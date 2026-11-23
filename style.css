@@ -34,9 +34,9 @@ h1 { margin: 0 0 28px; font-size: 30px; letter-spacing: -0.03em; }
 /* ---------- 카메라 ---------- */
 #cam { overflow: hidden; }
 #stage { position: absolute; inset: 0; }
-#video, #overlay, #frameGlow { position: absolute; }
-#video { object-fit: cover; background: #111; }
-#video.mirror { transform: scaleX(-1); }
+#view, #overlay, #frameGlow { position: absolute; }
+#video { position: absolute; width: 2px; height: 2px; opacity: 0; pointer-events: none; }
+#view { background: #111; }
 #overlay { pointer-events: none; }
 #frameGlow { pointer-events: none; border: 5px solid transparent; transition: border-color .25s; }
 #frameGlow.on { border-color: var(--go); }
@@ -84,6 +84,11 @@ h1 { margin: 0 0 28px; font-size: 30px; letter-spacing: -0.03em; }
 .shutter.go span { background: var(--go); }
 @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(18,183,106,.6); } 50% { box-shadow: 0 0 0 12px rgba(18,183,106,0); } }
 
+.mid { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.chip { display: flex; align-items: center; gap: 6px; padding: 8px 14px; border-radius: 999px; background: rgba(0,0,0,.5); font-size: 14px; }
+.chip svg { width: 18px; height: 18px; fill: none; stroke: #fff; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.chip b { color: #7ef0b4; }
+
 /* ---------- 시트 ---------- */
 .sheet { position: fixed; inset: 0; z-index: 20; background: rgba(0,0,0,.5); display: flex; align-items: flex-end; justify-content: center; }
 .sheet-card { width: 100%; max-width: 500px; max-height: 90vh; overflow-y: auto; background: var(--white); color: var(--ink); border-radius: 26px 26px 0 0;
@@ -94,6 +99,15 @@ h1 { margin: 0 0 28px; font-size: 30px; letter-spacing: -0.03em; }
 .primary { background: var(--ink); color: #fff; }
 .ghost { background: var(--bg2); color: var(--ink); }
 .wide { width: 100%; }
+.sheet.clear { background: transparent; }
+.presets { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.presets button { padding: 14px 2px; border-radius: 14px; background: var(--bg2); color: var(--ink); font-size: 14px; word-break: keep-all; font-weight: 700; }
+.presets button.on { background: var(--go); color: #fff; }
+.fine summary { padding: 8px 0; color: var(--soft); font-size: 15px; cursor: pointer; }
+.slide { display: flex; align-items: center; gap: 12px; padding: 8px 0; font-size: 15px; }
+.slide span { width: 92px; flex: none; }
+.slide small { display: block; color: var(--soft); font-size: 12px; }
+.slide input { flex: 1; min-width: 0; accent-color: var(--go); }
 
 .howto { list-style: none; margin: 4px 0 8px; padding: 0; display: grid; gap: 14px; }
 .howto li { display: flex; align-items: center; gap: 14px; font-size: 17px; line-height: 1.4; }

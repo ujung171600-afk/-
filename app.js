@@ -2,12 +2,15 @@
 // 얼굴/몸 인식(MediaPipe, 휴대폰 안에서만 실행) + 폰 기울기 센서
 
 import { FilesetResolver, FaceLandmarker, PoseLandmarker } from "./vendor/vision_bundle.mjs";
+import { createBeauty, faceShape, PRESETS } from "./beauty.js";
 
 const $ = (s) => document.querySelector(s);
 const video = $("#video"), overlay = $("#overlay"), ctx = overlay.getContext("2d");
+const view = $("#view");
+const engine = createBeauty(view);
 
 // ---------- 설정 ----------
-const DEF = { voice: false, auto: false, mirror: true, ratio: "3:4", seenHowto: false };
+const DEF = { voice: false, auto: false, mirror: true, ratio: "3:4", seenHowto: false, preset: "natural", beauty: { ...PRESETS.natural } };
 let opts = { ...DEF };
 try { Object.assign(opts, JSON.parse(localStorage.getItem("isc-opts") || "{}")); } catch {}
 const saveOpts = () => { try { localStorage.setItem("isc-opts", JSON.stringify(opts)); } catch {} };
@@ -81,7 +84,6 @@ async function startCamera() {
     return;
   }
   video.srcObject = stream;
-  video.classList.toggle("mirror", facing === "user");
   await video.play().catch(() => {});
   layout();
 }
@@ -94,9 +96,10 @@ function layout() {
   if (h > maxH) { h = maxH; w = h * r; }
   const y = Math.max(0, Math.min((H - h) / 2, 56));
   box = { x: (W - w) / 2, y, w, h };
-  for (const el of [video, overlay, $("#frameGlow")]) Object.assign(el.style, { left: box.x + "px", top: y + "px", width: w + "px", height: h + "px" });
+  for (const el of [view, overlay, $("#frameGlow")]) Object.assign(el.style, { left: box.x + "px", top: y + "px", width: w + "px", height: h + "px" });
   const dpr = Math.min(devicePixelRatio || 1, 2);
   overlay.width = Math.round(w * dpr); overlay.height = Math.round(h * dpr);
+  view.width = Math.round(w * dpr); view.height = Math.round(h * dpr);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 addEventListener("resize", layout);
@@ -283,6 +286,7 @@ function loop(t) {
     lastDetect = t;
     try { result = lm.detectForVideo(video, t); } catch (e) { console.warn(e); }
   }
+  engine.render(video, c, opts.beauty, currentFace(c), facing === "user");
   checks = mode === "selfie" ? selfieItems(c) : personItems(c, mode === "full");
   guide(t);
   draw();
@@ -356,16 +360,23 @@ function draw() {
   }
 }
 
+function currentFace(c) {
+  const f = mode === "selfie" && result && result.faceLandmarks && result.faceLandmarks[0];
+  if (!f) return null;
+  return faceShape((i) => toC(f[i], c), c.cw / c.ch);
+}
+
 // ---------- 촬영 ----------
 $("#shutter").onclick = () => capture(true);
 async function capture(showReview = false) {
   const c = crop(); if (!c) return;
   const good = checks.length > 0 && !checks.some((k) => !k.ok && !k.soft);
-  const cv = Object.assign(document.createElement("canvas"), { width: Math.round(c.cw), height: Math.round(c.ch) });
-  const g = cv.getContext("2d");
-  if (facing === "user" && opts.mirror) { g.translate(cv.width, 0); g.scale(-1, 1); }
-  g.drawImage(video, c.ox, c.oy, c.cw, c.ch, 0, 0, cv.width, cv.height);
-  const blob = await new Promise((r) => cv.toBlob(r, "image/jpeg", 0.95));
+  // 뽀샵이 들어간 원본 크기 사진을 한 번 그려서 저장
+  const keepW = view.width, keepH = view.height;
+  view.width = Math.round(c.cw); view.height = Math.round(c.ch);
+  engine.render(video, c, opts.beauty, currentFace(c), facing === "user" && opts.mirror);
+  const blob = await new Promise((r) => view.toBlob(r, "image/jpeg", 0.95));
+  view.width = keepW; view.height = keepH;
   if (!blob) return;
   const shot = { blob, url: URL.createObjectURL(blob), good, at: Date.now() };
   shots.push(shot);
@@ -408,6 +419,21 @@ $("#galleryBtn").onclick = () => {
   $("#gallery").hidden = false;
 };
 $("#closeGallery").onclick = () => ($("#gallery").hidden = true);
+
+// ---------- 뽀샵 ----------
+const SL = { bSmooth: "smooth", bBright: "bright", bWarm: "warm", bSlim: "slim", bEye: "eye" };
+function syncBeauty() {
+  $("#beautyName").textContent = PRESETS[opts.preset] ? PRESETS[opts.preset].name : "직접 조절";
+  document.querySelectorAll("#presets button").forEach((b) => b.classList.toggle("on", b.dataset.p === opts.preset));
+  for (const id in SL) $("#" + id).value = opts.beauty[SL[id]];
+}
+document.querySelectorAll("#presets button").forEach((b) => (b.onclick = () => {
+  opts.preset = b.dataset.p; const { name, ...v } = PRESETS[b.dataset.p]; opts.beauty = v; saveOpts(); syncBeauty();
+}));
+for (const id in SL) $("#" + id).oninput = (e) => { opts.beauty[SL[id]] = +e.target.value; opts.preset = "custom"; saveOpts(); syncBeauty(); };
+$("#beautyBtn").onclick = () => { if (!engine.gl) { toast("이 폰에서는 뽀샵을 쓸 수 없어요"); return; } $("#beauty").hidden = false; };
+$("#closeBeauty").onclick = () => ($("#beauty").hidden = true);
+syncBeauty();
 
 // ---------- 설정 ----------
 const bind = (id, key) => {
