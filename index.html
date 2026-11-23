@@ -70,7 +70,7 @@
       <b id="sayMain">카메라 켜는 중…</b>
       <span id="saySub"></span>
     </div>
-    <button id="beautyBtn" class="chip">뽀샵 <b id="beautyName">자연스럽게</b></button>
+    <button id="beautyBtn" class="chip">뽀샵 <b id="beautyName">피부결 정돈</b></button>
     <div class="controls">
       <button id="galleryBtn" class="thumb" aria-label="찍은 사진"><img id="thumbImg" alt=""></button>
       <button id="shutter" class="shutter" aria-label="찍기"><span></span></button>
@@ -105,20 +105,12 @@
 <div id="beauty" class="sheet clear" hidden>
   <div class="sheet-card">
     <h2>뽀샵</h2>
+    <p class="note">얼굴 모양은 그대로 두고 피부결과 혈색만 살짝 정돈해요</p>
     <div id="presets" class="presets">
       <button data-p="none">없음</button>
-      <button data-p="natural">자연스럽게</button>
-      <button data-p="bright">화사하게</button>
-      <button data-p="strong">진하게</button>
+      <button data-p="natural">피부결 정돈</button>
+      <button data-p="more">조금 더</button>
     </div>
-    <details class="fine">
-      <summary>직접 조절하기</summary>
-      <label class="slide"><span>피부 매끈</span><input type="range" id="bSmooth" min="0" max="1" step="0.05"></label>
-      <label class="slide"><span>밝게</span><input type="range" id="bBright" min="0" max="1" step="0.05"></label>
-      <label class="slide"><span>혈색</span><input type="range" id="bWarm" min="0" max="1" step="0.05"></label>
-      <label class="slide"><span>얼굴 갸름<small>셀카</small></span><input type="range" id="bSlim" min="0" max="1" step="0.05"></label>
-      <label class="slide"><span>눈 크게<small>셀카</small></span><input type="range" id="bEye" min="0" max="1" step="0.05"></label>
-    </details>
     <button id="closeBeauty" class="primary wide">완료</button>
   </div>
 </div>

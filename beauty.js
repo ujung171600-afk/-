@@ -56,8 +56,8 @@ void main() {
   vec2 tc = crop.xy + p * crop.zw;
   vec3 c = texture2D(tex, tc).rgb;
 
+  float m = skin(c);
   if (smoothAmt > 0.001) {
-    float m = skin(c);
     if (m > 0.01) {
       vec3 sum = c; float ws = 1.0;
       for (int i = 1; i < 20; i++) {
@@ -66,14 +66,14 @@ void main() {
         vec2 o = vec2(cos(a), sin(a)) * sqrt(fi) * rad * texel;
         vec3 s = texture2D(tex, tc + o).rgb;
         vec3 df = s - c;
-        float w = exp(-dot(df, df) * mix(60.0, 14.0, smoothAmt));
+        float w = exp(-dot(df, df) * mix(90.0, 40.0, smoothAmt));
         sum += s * w; ws += w;
       }
-      c = mix(c, sum / ws, smoothAmt * m * 0.9);
+      c = mix(c, sum / ws, smoothAmt * m * 0.55);
     }
   }
   c = 1.0 - pow(max(1.0 - c, 0.0), vec3(1.0 + bright * 0.55));
-  c += warm * vec3(0.03, 0.006, -0.012);
+  c += warm * m * vec3(0.04, 0.012, -0.008); // 피부에만 살짝 혈색
   gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0);
 }`;
 
@@ -139,9 +139,9 @@ export function faceShape(P, aspect) {
   return { eyes: [eyeL, eyeR], eyeR: eyeW * 0.95, jaw, ctr: [n.x, n.y], jawR: fw * 0.28 };
 }
 
+// 피부결 정돈 + 피부에만 옅은 혈색. 얼굴 모양과 밝기는 원본 그대로.
 export const PRESETS = {
-  none:    { name: "없음",       smooth: 0,    bright: 0,    warm: 0,   slim: 0,    eye: 0 },
-  natural: { name: "자연스럽게", smooth: 0.45, bright: 0.25, warm: 0.3, slim: 0.3,  eye: 0.2 },
-  bright:  { name: "화사하게",   smooth: 0.6,  bright: 0.5,  warm: 0.5, slim: 0.45, eye: 0.3 },
-  strong:  { name: "진하게",     smooth: 0.85, bright: 0.6,  warm: 0.5, slim: 0.7,  eye: 0.5 },
+  none:    { name: "없음",        smooth: 0,    bright: 0, warm: 0,   slim: 0, eye: 0 },
+  natural: { name: "피부결 정돈", smooth: 0.35, bright: 0, warm: 0.5, slim: 0, eye: 0 },
+  more:    { name: "조금 더",     smooth: 0.6,  bright: 0, warm: 0.7, slim: 0, eye: 0 },
 };

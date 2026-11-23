@@ -123,7 +123,8 @@ h1 { margin: 0; font-size: 28px; font-weight: 600; line-height: 1.2; }
 .how .go { fill: #4cc38a; }
 
 
-.presets { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.note { margin: 0; color: var(--soft); font-size: 14px; }
+.presets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .presets button { min-height: 48px; padding: 0 2px; border-radius: 10px; background: var(--bg2); color: var(--ink); font-size: 14px; font-weight: 500; word-break: keep-all; transition: background .15s var(--ease), color .15s var(--ease); }
 .presets button.on { background: var(--ink); color: #fff; }
 .fine summary { padding: 8px 0; color: var(--soft); font-size: 15px; cursor: pointer; }

@@ -412,16 +412,16 @@ $("#galleryBtn").onclick = () => {
 $("#closeGallery").onclick = () => ($("#gallery").hidden = true);
 
 // ---------- 뽀샵 ----------
-const SL = { bSmooth: "smooth", bBright: "bright", bWarm: "warm", bSlim: "slim", bEye: "eye" };
+// 예전 버전의 강한 설정(갸름·눈·밝기)이 남아 있으면 피부결 정돈으로 되돌림
+if (!PRESETS[opts.preset]) opts.preset = "natural";
+{ const { name, ...v } = PRESETS[opts.preset]; opts.beauty = v; }
 function syncBeauty() {
-  $("#beautyName").textContent = PRESETS[opts.preset] ? PRESETS[opts.preset].name : "직접 조절";
+  $("#beautyName").textContent = PRESETS[opts.preset].name;
   document.querySelectorAll("#presets button").forEach((b) => b.classList.toggle("on", b.dataset.p === opts.preset));
-  for (const id in SL) $("#" + id).value = opts.beauty[SL[id]] ?? 0;
 }
 document.querySelectorAll("#presets button").forEach((b) => (b.onclick = () => {
   opts.preset = b.dataset.p; const { name, ...v } = PRESETS[b.dataset.p]; opts.beauty = v; saveOpts(); syncBeauty();
 }));
-for (const id in SL) $("#" + id).oninput = (e) => { opts.beauty[SL[id]] = +e.target.value; opts.preset = "custom"; saveOpts(); syncBeauty(); };
 $("#beautyBtn").onclick = () => { if (!engine.gl) { toast("이 폰에서는 뽀샵을 쓸 수 없어요"); return; } $("#beauty").hidden = false; };
 $("#closeBeauty").onclick = () => ($("#beauty").hidden = true);
 syncBeauty();
