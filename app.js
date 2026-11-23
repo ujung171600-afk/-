@@ -5,7 +5,7 @@
 // 얼굴·몸 인식(MediaPipe)은 휴대폰 안에서만 돌고 사진은 밖으로 나가지 않는다.
 
 import { FilesetResolver, FaceLandmarker, PoseLandmarker } from "./vendor/vision_bundle.mjs";
-import { createBeauty, PRESETS } from "./beauty.js?v=8";
+import { createBeauty, PRESETS } from "./beauty.js?v=9";
 
 const $ = (s) => document.querySelector(s);
 const video = $("#video"), view = $("#view"), overlay = $("#overlay"), ctx = overlay.getContext("2d");
@@ -271,7 +271,7 @@ function fullPos(c, k) {
   if (headCut) return feetOk ? { ok: false, main: "한 걸음 뒤로 가요", sub: "머리가 잘려요" } : { ok: false, main: "폰을 조금 높이 들어요", sub: "머리가 잘려요" };
   if (footY > 0.985) return { ok: false, main: "한 걸음 뒤로 가요", sub: "발끝이 잘려요" };
   if (!feetOk) return head.y > 0.12 ? { ok: false, main: "한 걸음 앞으로 가요", sub: "발이 아래 점선에 닿게" } : { ok: false, main: "폰을 조금 높이 들어요", sub: "발이 아래 점선에 닿게" };
-  if (sky) return { ok: false, main: "폰을 더 낮게 들어요", sub: "머리 위가 너무 비어요" };
+  if (sky) return footY > 0.95 ? { ok: false, main: "폰을 조금 낮게 들어요", sub: "머리 위가 너무 비어요" } : { ok: false, main: "한 걸음 앞으로 가요", sub: "머리 위가 너무 비어요" };
   if (Math.abs(head.x - 0.5) > 0.12 * k) return { ok: false, main: `폰을 ${side(head.x - 0.5)}으로 조금 옮겨요`, sub: "친구가 가운데 오게" };
   return { ok: true };
 }
@@ -316,8 +316,8 @@ function loop(t) {
   else if (!p.ok) { main = p.main; sub = p.sub || ""; }
   else { main = "좋아요, 지금 찍어요"; sub = st.tip; go = true; }
   if (main !== cand) { cand = main; candAt = t; }
-  if (main !== shownMain && (t - candAt > 450 || !shownMain || go)) { shownMain = main; say(main, sub, go); speak(main); }
-  else if (go && $("#saySub").textContent !== (sub || "")) $("#saySub").textContent = sub || "";
+  if (main !== shownMain && (t - candAt > 450 || !shownMain || go || $("#say").classList.contains("go"))) { shownMain = main; say(main, sub, go); speak(main); }
+  else if (main === shownMain && $("#saySub").textContent !== (sub || "")) $("#saySub").textContent = sub || "";
 
   if (ready && !wasReady) beep(1200, 0.06);
   wasReady = ready;
@@ -426,13 +426,24 @@ async function capture() {
   capEngine.render(video, c, beauty(), mirrored() && opts.mirror);
   const blob = await new Promise((r) => cap.toBlob(r, "image/jpeg", 0.95));
   if (!blob) return;
-  const shot = { blob, url: URL.createObjectURL(blob), at: Date.now(), saved: false };
+  const shot = { blob, url: URL.createObjectURL(blob), thumb: null, at: Date.now(), saved: false };
+  makeThumb(shot);
   shots.push(shot);
-  if (shots.length > 30) { const old = shots.shift(); URL.revokeObjectURL(old.url); }
-  $("#thumbImg").src = shot.url;
+  if (shots.length > 30) { const old = shots.shift(); URL.revokeObjectURL(old.url); if (old.thumb) URL.revokeObjectURL(old.thumb); }
+  $("#thumbImg").src = shot.thumb || shot.url;
   const fl = $("#flash"); fl.classList.add("on"); setTimeout(() => fl.classList.remove("on"), 60);
   beep(1400, 0.05);
   openReview(shot);
+}
+// 목록용 작은 사진은 확인 화면을 띄운 뒤 천천히 만든다 (메모리 절약)
+function makeThumb(shot) {
+  const img = new Image();
+  img.onload = () => {
+    const tc = Object.assign(document.createElement("canvas"), { width: 360, height: Math.round(360 * img.naturalHeight / img.naturalWidth) });
+    tc.getContext("2d").drawImage(img, 0, 0, tc.width, tc.height);
+    tc.toBlob((tb) => { if (!tb) return; shot.thumb = URL.createObjectURL(tb); if (shots[shots.length - 1] === shot) $("#thumbImg").src = shot.thumb; }, "image/jpeg", 0.8);
+  };
+  setTimeout(() => (img.src = shot.url), 300);
 }
 function openReview(s) { current = s; $("#reviewImg").src = s.url; $("#reviewHint").textContent = ""; $("#review").hidden = false; }
 $("#retake").onclick = () => ($("#review").hidden = true);
@@ -461,7 +472,7 @@ $("#galleryBtn").onclick = () => {
   [...shots].reverse().forEach((s) => {
     const b = document.createElement("button");
     b.innerHTML = '<img alt="찍은 사진">' + (s.saved ? "" : '<span class="unsaved">저장 안 함</span>');
-    b.querySelector("img").src = s.url;
+    b.querySelector("img").src = s.thumb || s.url;
     b.onclick = () => { $("#gallery").hidden = true; openReview(s); }; g.appendChild(b);
   });
   $("#gallery").hidden = false;

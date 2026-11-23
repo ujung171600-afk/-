@@ -42,7 +42,7 @@ void main() {
     }
     c = mix(c, sum / ws, smoothAmt * m * 0.55);
   }
-  c += warm * m * vec3(0.04, 0.012, -0.008); // 피부에만 살짝 혈색
+  c += warm * m * vec3(0.03, -0.0114, -0.02); // 피부에만 살짝 혈색 (밝기는 그대로)
   gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0);
 }`;
 

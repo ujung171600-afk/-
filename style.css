@@ -51,7 +51,7 @@ h1 { margin: 0; font-size: 28px; font-weight: 500; line-height: 1.2; }
 #overlay, #glow { pointer-events: none; }
 #glow { border: 4px solid transparent; transition: border-color .15s var(--ease); }
 #glow.on { border-color: var(--ready); }
-#flash { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; transition: opacity .3s; }
+#flash { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; transition: opacity .3s var(--ease); }
 #flash.on { opacity: .9; transition: none; }
 
 .top { position: absolute; top: 0; left: 0; right: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px;
