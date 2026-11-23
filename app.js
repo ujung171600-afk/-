@@ -1,588 +1,432 @@
-// 인생샷 코치 — 실시간 촬영 코칭 카메라
-// 얼굴/자세 인식(MediaPipe, 기기 안에서 실행) + 폰 기울기 센서로 각도·높이·구도·거리·빛을 판단하고
-// 가장 먼저 고쳐야 할 것 한 가지를 말로 알려준다.
+// 인생샷 코치 — 고쳐야 할 것 딱 하나를 쉬운 말과 그림으로 알려주는 카메라
+// 얼굴/몸 인식(MediaPipe, 휴대폰 안에서만 실행) + 폰 기울기 센서
 
 import { FilesetResolver, FaceLandmarker, PoseLandmarker } from "./vendor/vision_bundle.mjs";
 
 const $ = (s) => document.querySelector(s);
-const video = $("#video");
-const overlay = $("#overlay");
-const ctx = overlay.getContext("2d");
+const video = $("#video"), overlay = $("#overlay"), ctx = overlay.getContext("2d");
 
-// ---------- 설정 (기기에 저장) ----------
-const DEFAULTS = { voice: false, auto: false, grid: true, dots: false, mirror: true, ratio: "3:4", turn: true };
-let opts = { ...DEFAULTS };
+// ---------- 설정 ----------
+const DEF = { voice: false, auto: false, mirror: true, ratio: "3:4", seenHowto: false };
+let opts = { ...DEF };
 try { Object.assign(opts, JSON.parse(localStorage.getItem("isc-opts") || "{}")); } catch {}
 const saveOpts = () => { try { localStorage.setItem("isc-opts", JSON.stringify(opts)); } catch {} };
 
 // ---------- 상태 ----------
-let mode = "selfie";            // selfie | half | full
-let facing = "user";            // user | environment
-let stream = null;
+let mode = "selfie", facing = "user", stream = null;
 let vision = null, faceLm = null, poseLm = null, aiFailed = false;
-let lastDetect = 0, lastResult = null;
-let orient = null;              // { up: 앞면이 위를 향한 각도(°), roll: 좌우 기울기(°) }
+let lastDetect = 0, result = null, orient = null;
 let needOrientPerm = typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function";
-let frameBox = { x: 0, y: 0, w: 0, h: 0 };  // 화면에서 사진 영역
-let shots = [];
-let goodSince = 0, autoBusy = false;
-let shownMsg = "", candMsg = "", candSince = 0;
-let lastSpoken = "", lastSpeakAt = 0;
-const ema = {};                 // 지표 부드럽게
-const smooth = (k, v, a = 0.35) => (v == null ? (delete ema[k], null) : (ema[k] = ema[k] == null ? v : ema[k] + a * (v - ema[k])));
+let box = { x: 0, y: 0, w: 0, h: 0 };
+let shots = [], current = null;
+let checks = [], readySince = 0, autoBusy = false;
+let shown = "", cand = "", candAt = 0, lastSpoken = "", lastSpeakAt = 0;
+const ema = {};
+const sm = (k, v, a = 0.35) => (ema[k] = ema[k] == null ? v : ema[k] + a * (v - ema[k]));
+const ratio = () => { const [a, b] = opts.ratio.split(":").map(Number); return a / b; };
+const MODE_NAME = { selfie: "셀카", half: "상반신", full: "전신" };
 
-const ratioNum = () => { const [a, b] = opts.ratio.split(":").map(Number); return a / b; };
+// ---------- 아이콘 ----------
+const ICON = {
+  up: '<path d="M12 20V5M5 11l7-7 7 7"/>',
+  down: '<path d="M12 4v15M5 13l7 7 7-7"/>',
+  left: '<path d="M20 12H5M11 5l-7 7 7 7"/>',
+  right: '<path d="M4 12h15M13 5l7 7-7 7"/>',
+  far: '<path d="M9 9L4 4M4 9V4h5M15 15l5 5M20 15v5h-5M15 9l5-5M15 4h5v5M9 15l-5 5M4 15v5h5"/>',
+  near: '<path d="M4 4l5 5M9 4v5H4M20 20l-5-5M15 20v-5h5M20 4l-5 5M20 9h-5V4M4 20l5-5M4 15h5v5"/>',
+  phone: '<rect x="7" y="3" width="10" height="18" rx="2.5"/><path d="M11 18h2"/>',
+  tiltBack: '<rect x="8" y="6" width="8" height="15" rx="2" transform="rotate(-18 12 13)"/><path d="M17 3c2 1 3 3 3 5M20 8l-2-1M20 8l1-2"/>',
+  tiltFwd: '<rect x="8" y="3" width="8" height="15" rx="2" transform="rotate(18 12 10)"/><path d="M7 21c-2-1-3-3-3-5M4 16l2 1M4 16l-1 2"/>',
+  level: '<path d="M3 12h18"/><path d="M6 8l12 8" opacity=".35"/>',
+  person: '<circle cx="12" cy="7" r="3.5"/><path d="M5 21c0-5 3-8 7-8s7 3 7 8"/>',
+  chinIn: '<circle cx="11" cy="11" r="7"/><path d="M9 10h.01M14 10h.01M10 14c1 .7 2 .7 3 0M19 18l-3-2"/>',
+  chinUp: '<circle cx="11" cy="12" r="7"/><path d="M9 11h.01M14 11h.01M10 15c1 .7 2 .7 3 0M19 4l-3 3"/>',
+  turn: '<circle cx="12" cy="12" r="7"/><path d="M15 10h.01M11 10h.01M12 15c1 .5 2 .5 3-.3"/><path d="M3 6c2-2 4-3 6-3" /><path d="M3 6V3M3 6h3"/>',
+  head: '<circle cx="12" cy="12" r="7"/><path d="M9 11h.01M15 11h.01M10 15h4"/><path d="M12 2v3"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M5 19l1.5-1.5M17.5 6.5L19 5"/>',
+  check: '<path d="M5 12.5l4.5 4.5L19 7"/>',
+  wait: '<circle cx="12" cy="12" r="8" opacity=".3"/><path d="M12 4a8 8 0 0 1 8 8"/>',
+};
+const NUDGE = { up: [0, -5], down: [0, 5], left: [-5, 0], right: [5, 0], far: [0, 0], near: [0, 0] };
 
 // ---------- 화면 전환 ----------
-document.querySelectorAll("[data-mode]").forEach((b) =>
+document.querySelectorAll(".pick-card").forEach((b) =>
   b.addEventListener("click", async () => {
-    const m = b.dataset.mode;
     await askOrientPermission();
-    if ($("#cam").hidden) { $("#start").hidden = true; $("#cam").hidden = false; }
-    setMode(m);
+    $("#start").hidden = true; $("#cam").hidden = false;
+    setMode(b.dataset.mode);
+    if (!opts.seenHowto) $("#howto").hidden = false;
   })
 );
+$("#howtoOk").onclick = () => { $("#howto").hidden = true; opts.seenHowto = true; saveOpts(); };
 $("#backBtn").onclick = () => { stopCamera(); $("#cam").hidden = true; $("#start").hidden = false; };
 $("#flipBtn").onclick = () => { facing = facing === "user" ? "environment" : "user"; startCamera(); };
 
 function setMode(m) {
-  mode = m;
-  document.querySelectorAll(".mode-tabs button").forEach((b) => b.classList.toggle("on", b.dataset.mode === m));
+  mode = m; $("#modeName").textContent = MODE_NAME[m];
   facing = m === "selfie" ? "user" : "environment";
-  Object.keys(ema).forEach((k) => delete ema[k]);
-  lastResult = null; shownMsg = ""; candMsg = "";
-  startCamera();
-  ensureModels();
+  for (const k in ema) delete ema[k];
+  result = null; shown = ""; cand = "";
+  startCamera(); loadAI();
 }
 
 // ---------- 카메라 ----------
 async function startCamera() {
   stopCamera();
-  setCoach("카메라 켜는 중…", "", false);
+  show("wait", "카메라 켜는 중…", "", false);
   try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      audio: false,
-      video: { facingMode: { ideal: facing }, width: { ideal: 1920 }, height: { ideal: 1440 } },
-    });
-  } catch (e) {
-    const insecure = !window.isSecureContext;
-    setCoach("카메라를 켤 수 없어요",
-      insecure ? "https:// 주소로 열어야 카메라가 켜져요. 설치 안내를 봐주세요." : "브라우저 설정에서 이 사이트의 카메라를 허용해 주세요.", false);
+    stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: facing }, width: { ideal: 1920 }, height: { ideal: 1440 } } });
+  } catch {
+    show("phone", "카메라를 켤 수 없어요", "브라우저에서 카메라 '허용'을 눌러주세요", false);
     return;
   }
   video.srcObject = stream;
   video.classList.toggle("mirror", facing === "user");
   await video.play().catch(() => {});
-  setupZoom();
   layout();
 }
 function stopCamera() { if (stream) stream.getTracks().forEach((t) => t.stop()); stream = null; }
 
-function setupZoom() {
-  const track = stream && stream.getVideoTracks()[0];
-  const caps = track && track.getCapabilities ? track.getCapabilities() : {};
-  const wrap = $("#zoomWrap"), zr = $("#zoom");
-  if (caps.zoom && caps.zoom.max > caps.zoom.min) {
-    zr.min = caps.zoom.min; zr.max = Math.min(caps.zoom.max, 5); zr.step = caps.zoom.step || 0.1;
-    const start = mode === "selfie" ? caps.zoom.min : Math.min(Math.max(1, caps.zoom.min), caps.zoom.max);
-    zr.value = start; $("#zoomVal").textContent = (+start).toFixed(1) + "x";
-    wrap.hidden = false;
-    zr.oninput = () => { $("#zoomVal").textContent = (+zr.value).toFixed(1) + "x"; track.applyConstraints({ advanced: [{ zoom: +zr.value }] }).catch(() => {}); };
-  } else wrap.hidden = true;
-}
-
-// 사진 비율 영역을 화면에 맞춰 배치 (보이는 그대로 저장)
 function layout() {
-  const W = innerWidth, H = innerHeight, r = ratioNum();
+  const W = innerWidth, H = innerHeight, r = ratio();
   let w = W, h = W / r;
-  if (h > H) { h = H; w = H * r; }
-  frameBox = { x: (W - w) / 2, y: (H - h) / 2, w, h };
-  for (const el of [video, overlay]) { el.style.width = w + "px"; el.style.height = h + "px"; }
+  const maxH = H - 120;
+  if (h > maxH) { h = maxH; w = h * r; }
+  const y = Math.max(0, Math.min((H - h) / 2, 56));
+  box = { x: (W - w) / 2, y, w, h };
+  for (const el of [video, overlay, $("#frameGlow")]) Object.assign(el.style, { left: box.x + "px", top: y + "px", width: w + "px", height: h + "px" });
   const dpr = Math.min(devicePixelRatio || 1, 2);
   overlay.width = Math.round(w * dpr); overlay.height = Math.round(h * dpr);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 addEventListener("resize", layout);
 
-// 영상 좌표(0~1) → 사진 영역 좌표(0~1). 셀카 미러는 그릴 때만 반영.
-function cropInfo() {
-  const vw = video.videoWidth, vh = video.videoHeight, r = ratioNum();
+function crop() {
+  const vw = video.videoWidth, vh = video.videoHeight, r = ratio();
   if (!vw) return null;
   let cw = vw, ch = vh;
   if (vw / vh > r) cw = vh * r; else ch = vw / r;
   return { vw, vh, cw, ch, ox: (vw - cw) / 2, oy: (vh - ch) / 2 };
 }
-function toCrop(p, c) { return { x: (p.x * c.vw - c.ox) / c.cw, y: (p.y * c.vh - c.oy) / c.ch, v: p.visibility ?? 1 }; }
+const toC = (p, c) => ({ x: (p.x * c.vw - c.ox) / c.cw, y: (p.y * c.vh - c.oy) / c.ch });
 
-// ---------- AI 모델 ----------
-async function ensureModels() {
+// ---------- AI ----------
+async function loadAI() {
   if (aiFailed) return;
   try {
-    if (!vision) vision = await FilesetResolver.forVisionTasks(new URL("./vendor", location.href).href.replace(/\/$/, ""));
-    const make = async (Cls, path, extra) => {
+    if (!vision) vision = await FilesetResolver.forVisionTasks(new URL("./vendor", location.href).href);
+    const make = async (Cls, path) => {
       for (const delegate of ["GPU", "CPU"]) {
-        try { return await Cls.createFromOptions(vision, { baseOptions: { modelAssetPath: path, delegate }, runningMode: "VIDEO", ...extra }); }
+        try { return await Cls.createFromOptions(vision, { baseOptions: { modelAssetPath: path, delegate }, runningMode: "VIDEO", numFaces: 1, numPoses: 1 }); }
         catch (e) { if (delegate === "CPU") throw e; }
       }
     };
-    if (mode === "selfie" && !faceLm) faceLm = await make(FaceLandmarker, "./vendor/face_landmarker.task", { numFaces: 1 });
-    if (mode !== "selfie" && !poseLm) poseLm = await make(PoseLandmarker, "./vendor/pose_landmarker_lite.task", { numPoses: 1 });
-  } catch (e) {
-    console.warn(e); aiFailed = true;
-    toast("얼굴 인식을 못 켰어요. 기울기 안내만 할게요.");
-  }
+    if (mode === "selfie" && !faceLm) faceLm = await make(FaceLandmarker, "./vendor/face_landmarker.task");
+    if (mode !== "selfie" && !poseLm) poseLm = await make(PoseLandmarker, "./vendor/pose_landmarker_lite.task");
+  } catch (e) { console.warn(e); aiFailed = true; toast("얼굴 인식이 안 돼서 폰 각도만 알려드릴게요"); }
 }
 
-// ---------- 기울기 센서 ----------
+// ---------- 기울기 ----------
 async function askOrientPermission() {
   if (!needOrientPerm) return;
-  try { const r = await DeviceOrientationEvent.requestPermission(); needOrientPerm = false; if (r !== "granted") toast("기울기 센서가 꺼져 있어 각도 안내는 빠져요."); }
-  catch {}
+  try { await DeviceOrientationEvent.requestPermission(); } catch {}
+  needOrientPerm = false;
 }
 addEventListener("deviceorientation", (e) => {
   if (e.beta == null) return;
   const b = (e.beta * Math.PI) / 180, g = (e.gamma * Math.PI) / 180;
-  // 기기 좌표계에서 '하늘 방향' 벡터 (W3C Z-X'-Y'' 회전 기준)
   const ux = -Math.cos(b) * Math.sin(g), uy = Math.sin(b), uz = Math.cos(b) * Math.cos(g);
-  const up = (Math.asin(Math.max(-1, Math.min(1, uz))) * 180) / Math.PI; // 화면(=전면카메라)이 위로 향한 각도
-  let roll = (Math.atan2(ux, uy) * 180) / Math.PI;                        // 0 = 똑바로 세로
-  const ang = (screen.orientation && screen.orientation.angle) || window.orientation || 0;
-  orient = { up: smooth("up", up, 0.25), roll: smooth("roll", roll, 0.25), landscape: Math.abs(ang) === 90 || (Math.abs(roll) > 60 && Math.abs(roll) < 120) };
+  const up = (Math.asin(Math.max(-1, Math.min(1, uz))) * 180) / Math.PI; // 화면이 하늘을 향한 정도
+  const roll = (Math.atan2(ux, uy) * 180) / Math.PI;                      // 좌우 기울기 (0 = 똑바로)
+  orient = { up: sm("up", up, 0.25), roll: sm("roll", roll, 0.25), side: Math.abs(roll) > 55 && Math.abs(roll) < 125 };
 });
 
-// ---------- 판단 규칙 ----------
-// 각 항목: { key, label, s: good|warn|bad|na, msg, sub, pr(우선순위: 작을수록 먼저), w(점수 비중) }
-const C = (key, label, s, msg = "", sub = "", pr = 5, w = 1) => ({ key, label, s, msg, sub, pr, w });
-const dirPhone = (dx) => (dx < 0 ? "왼쪽" : "오른쪽");
+// ---------- 판단 ----------
+// 하나의 확인 항목: ok 여부, 안 맞으면 보여줄 아이콘·말. order 작은 것부터 하나씩 안내.
+const item = (key, ok, icon = "", main = "", sub = "", order = 5, soft = false) => ({ key, ok, icon, main, sub, order, soft });
+const side = (dx) => (dx < 0 ? "left" : "right");
+const sideKo = (dx) => (dx < 0 ? "왼쪽" : "오른쪽");
 
-function brightnessCheck(region) {
-  const b = sampleBrightness(region);
-  if (!b) return C("light", "빛", "na");
-  const { face, all } = b;
-  if (all < 45) return C("light", "빛", "bad", "너무 어두워요", "밝은 곳이나 창문 쪽을 바라보고 찍어요", 3, 0.8);
-  if (region && face < all - 28) return C("light", "빛", "warn", "역광이에요", "빛(창문·해)을 등지지 말고 마주 보세요", 6, 0.8);
-  if (region && face > 235) return C("light", "빛", "warn", "얼굴이 하얗게 날아가요", "직사광선을 피해 그늘이나 반그늘로", 7, 0.6);
-  return C("light", "빛", "good");
+function lightItem(region) {
+  const b = brightness(region);
+  if (!b) return null;
+  if (b.all < 45) return item("light", false, "sun", "조금 더 밝은 곳으로 가요", "창문이나 불빛 쪽을 바라보면 좋아요", 9);
+  if (region && b.face < b.all - 30) return item("light", false, "sun", "빛을 등지고 있어요", "창문·해를 마주 보고 서요", 9, true);
+  return item("light", true);
 }
 
-function selfieChecks(r, c) {
-  const out = [];
-  const o = orient;
-  // 폰 각도: 전면카메라가 10~25° 내려다보는 게 기본
-  if (o) {
-    if (o.landscape) out.push(C("angle", "각도", "bad", "폰을 세로로 들어요", "셀카는 세로가 얼굴 비율이 좋아요", 1, 1.4));
+function selfieItems(c) {
+  const list = [];
+  if (orient) {
+    if (orient.side) list.push(item("angle", false, "phone", "폰을 세워서 들어요", "", 1));
     else {
-      const down = -o.up;
-      if (down < 3) out.push(C("angle", "각도", "bad", "폰을 눈보다 조금 위로", "카메라가 살짝 내려다보게(10~25°) 들어요", 2, 1.4));
-      else if (down < 9) out.push(C("angle", "각도", "warn", "폰을 살짝만 더 위로", `지금 ${down.toFixed(0)}° · 목표 10~25°`, 4, 1.4));
-      else if (down <= 27) out.push(C("angle", "각도", "good"));
-      else if (down <= 38) out.push(C("angle", "각도", "warn", "너무 위에서 찍어요", `지금 ${down.toFixed(0)}° · 이마만 커 보여요. 폰을 조금 내려요`, 4, 1.4));
-      else out.push(C("angle", "각도", "bad", "폰을 내려요", "너무 높아서 얼굴이 눌려 보여요", 2, 1.4));
+      const down = -orient.up; // 내려다보는 각도
+      if (down < 6) list.push(item("angle", false, "up", "폰을 눈보다 조금 높이 들어요", "위에서 살짝 내려다보면 얼굴이 갸름해요", 2));
+      else if (down > 32) list.push(item("angle", false, "down", "폰을 조금 내려요", "너무 위에서 찍으면 이마만 커 보여요", 2));
+      else list.push(item("angle", true));
     }
-  } else out.push(C("angle", "각도", "na"));
-
-  const f = r && r.faceLandmarks && r.faceLandmarks[0];
-  if (!f) {
-    out.push(C("face", "얼굴", "bad", aiFailed ? "" : "얼굴이 보이게 해주세요", "", 0, 0));
-    out.push(brightnessCheck(null));
-    return out;
   }
-  const P = (i) => toCrop(f[i], c);
+  const f = result && result.faceLandmarks && result.faceLandmarks[0];
+  if (!f) { if (!aiFailed) list.push(item("face", false, "person", "얼굴이 화면에 나오게 해주세요", "", 0)); return list; }
+  const P = (i) => toC(f[i], c);
   const L = P(234), R = P(454), nose = P(1), chin = P(152), eL = P(33), eR = P(263), top = P(10);
-  const faceW = smooth("fw", Math.hypot(R.x - L.x, R.y - L.y));
-  const cx = smooth("cx", (L.x + R.x) / 2);
-  const eyeY = smooth("ey", (eL.y + eR.y) / 2);
-  const rollDeg = smooth("hr", (Math.atan2(eR.y - eL.y, eR.x - eL.x) * 180) / Math.PI);
-  const yawR = smooth("yaw", (nose.x - L.x) / (R.x - L.x || 1e-6));
-  const pitchR = smooth("pr", (nose.y - (eL.y + eR.y) / 2) / (chin.y - (eL.y + eR.y) / 2 || 1e-6));
+  const eyeMidY = (eL.y + eR.y) / 2;
+  const fw = sm("fw", Math.hypot(R.x - L.x, R.y - L.y));
+  const cx = sm("cx", (L.x + R.x) / 2);
+  const ey = sm("ey", eyeMidY);
+  const tilt = sm("tilt", (Math.atan2(eR.y - eL.y, eR.x - eL.x) * 180) / Math.PI);
+  const pitch = sm("pitch", (nose.y - eyeMidY) / (chin.y - eyeMidY || 1e-6));
+  const yaw = sm("yaw", (nose.x - L.x) / (R.x - L.x || 1e-6));
 
-  // 거리 (광각 왜곡)
-  if (faceW > 0.56) out.push(C("dist", "거리", "bad", "팔을 쭉 펴요", "너무 가까우면 코가 커 보여요(광각 왜곡)", 1, 1.2));
-  else if (faceW > 0.47) out.push(C("dist", "거리", "warn", "조금만 더 멀리", "팔을 끝까지 펴면 얼굴이 자연스러워요", 3, 1.2));
-  else if (faceW < 0.2) out.push(C("dist", "거리", "warn", "조금 더 가까이", "얼굴이 너무 작게 나와요", 6, 1.2));
-  else out.push(C("dist", "거리", "good"));
-
-  // 가로 위치: 가운데 (가장자리는 늘어남)
-  const dx = cx - 0.5;
-  if (Math.abs(dx) > 0.14) out.push(C("pos", "위치", "bad", `폰을 ${dirPhone(facing === "user" ? -dx : dx)}으로`, "얼굴을 화면 가운데에 두세요. 가장자리는 얼굴이 늘어나요", 3, 1));
-  else if (Math.abs(dx) > 0.07) out.push(C("pos", "위치", "warn", "얼굴을 가운데로", "", 7, 1));
-  else out.push(C("pos", "위치", "good"));
-
-  // 눈높이: 위쪽 1/3 선
-  if (eyeY > 0.5) out.push(C("eye", "눈높이", "bad", "폰을 조금 내려요", "눈이 위쪽 1/3 선에 오게", 4, 1));
-  else if (eyeY > 0.43) out.push(C("eye", "눈높이", "warn", "폰을 살짝 내려요", "눈을 위쪽 점선에 맞춰요", 6, 1));
-  else if (eyeY < 0.2) out.push(C("eye", "눈높이", "bad", "폰을 조금 올려요", "머리가 잘려요", 4, 1));
-  else if (eyeY < 0.27) out.push(C("eye", "눈높이", "warn", "폰을 살짝 올려요", "눈을 위쪽 점선에 맞춰요", 6, 1));
-  else out.push(C("eye", "눈높이", "good"));
-
-  // 턱 (얼굴 상하 각도)
-  if (pitchR < 0.22) out.push(C("chin", "턱", "bad", "턱을 당겨요", "턱을 들면 콧구멍과 턱선이 커 보여요", 2, 1.2));
-  else if (pitchR < 0.29) out.push(C("chin", "턱", "warn", "턱을 살짝 당겨요", "", 5, 1.2));
-  else if (pitchR > 0.55) out.push(C("chin", "턱", "warn", "턱을 조금 앞으로", "너무 숙이면 이중턱이 생겨요", 5, 1.2));
-  else out.push(C("chin", "턱", "good"));
-
-  // 고개 기울기
-  const rd = Math.abs(rollDeg);
-  if (rd > 14) out.push(C("tilt", "고개", "bad", "고개를 똑바로", "얼굴이 많이 기울었어요", 4, 0.8));
-  else if (rd > 7) out.push(C("tilt", "고개", "warn", "고개를 살짝 세워요", "", 8, 0.8));
-  else out.push(C("tilt", "고개", "good"));
-
-  // 얼짱각도 (좌우 회전)
-  const off = Math.abs(yawR - 0.5);
-  if (off > 0.3) out.push(C("turn", "얼굴방향", "bad", "얼굴을 카메라 쪽으로", "너무 옆으로 돌렸어요", 4, 0.8));
-  else if (opts.turn && off < 0.05) out.push(C("turn", "얼굴방향", "warn", "얼굴을 살짝 옆으로 돌려요", "10~20°만. 자신 있는 쪽 얼굴로", 9, 0.8));
-  else if (!opts.turn && off > 0.15) out.push(C("turn", "얼굴방향", "warn", "정면을 봐요", "", 8, 0.8));
-  else out.push(C("turn", "얼굴방향", "good"));
-
-  const xs = [L.x, R.x], ys = [top.y, chin.y];
-  out.push(brightnessCheck({ x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys) }));
-  return out;
+  list.push(fw > 0.5 ? item("dist", false, "far", "팔을 더 쭉 펴주세요", "가까이 찍으면 코가 커 보여요", 3)
+          : fw < 0.2 ? item("dist", false, "near", "폰을 조금 더 가까이", "", 3)
+          : item("dist", true));
+  const dx = cx - 0.5, sdx = -dx; // 셀카는 거울처럼 보이니 방향을 뒤집어 안내
+  list.push(Math.abs(dx) > 0.1 ? item("pos", false, side(sdx), `폰을 ${sideKo(sdx)}으로 조금 옮겨요`, "얼굴이 가운데 오게", 4) : item("pos", true));
+  list.push(ey > 0.46 ? item("eye", false, "down", "폰을 조금 내려요", "눈이 화면 위쪽에 오게", 5)
+          : ey < 0.24 ? item("eye", false, "up", "폰을 조금 올려요", "머리가 잘려요", 5)
+          : item("eye", true));
+  list.push(pitch < 0.26 ? item("chin", false, "chinIn", "턱을 살짝 당겨주세요", "턱을 들면 얼굴이 커 보여요", 6)
+          : pitch > 0.55 ? item("chin", false, "chinUp", "턱을 살짝 들어주세요", "너무 숙이면 이중턱이 생겨요", 6)
+          : item("chin", true));
+  list.push(Math.abs(tilt) > 10 ? item("tilt", false, "head", "고개를 똑바로 세워요", "", 7) : item("tilt", true));
+  list.push(Math.abs(yaw - 0.5) < 0.04 ? item("turn", false, "turn", "얼굴을 살짝만 옆으로 돌려요", "정면보다 얼굴선이 예뻐 보여요", 8, true)
+          : Math.abs(yaw - 0.5) > 0.3 ? item("turn", false, "turn", "카메라 쪽을 봐주세요", "", 8)
+          : item("turn", true));
+  const li = lightItem({ x0: Math.min(L.x, R.x), x1: Math.max(L.x, R.x), y0: top.y, y1: chin.y });
+  if (li) list.push(li);
+  return list;
 }
 
-// 자세 랜드마크 번호
-const PL = { nose: 0, eyeL: 2, eyeR: 5, shL: 11, shR: 12, elL: 13, elR: 14, hipL: 23, hipR: 24, kneeL: 25, kneeR: 26, ankL: 27, ankR: 28, heelL: 29, heelR: 30, footL: 31, footR: 32 };
+const PL = { nose: 0, eyeL: 2, eyeR: 5, shL: 11, shR: 12, elL: 13, elR: 14, kneeL: 25, kneeR: 26, ankL: 27, ankR: 28, heelL: 29, heelR: 30, footL: 31, footR: 32 };
 
-function personChecks(r, c, full) {
-  const out = [];
-  const o = orient;
-  if (o) {
-    const rearUp = -o.up;   // 후면카메라가 위로 향한 각도
-    const roll = o.roll;
-    if (o.landscape) out.push(C("vert", "세로", "warn", "폰을 세로로", "인물 사진은 세로가 비율이 좋아요", 2, 0.8));
+function personItems(c, full) {
+  const list = [];
+  if (orient) {
+    if (orient.side) list.push(item("angle", false, "phone", "폰을 세워서 들어요", "사람 사진은 세로가 예뻐요", 1));
     else {
-      out.push(C("vert", "세로", "good", "", "", 9, 0.4));
-      if (Math.abs(roll) > 5) out.push(C("level", "수평", "bad", `폰이 ${roll > 0 ? "왼쪽" : "오른쪽"}으로 기울었어요`, "화면 가운데 수평선을 초록으로 맞춰요", 1, 1.2));
-      else if (Math.abs(roll) > 1.8) out.push(C("level", "수평", "warn", "수평을 맞춰요", `${Math.abs(roll).toFixed(1)}° 기울었어요`, 5, 1.2));
-      else out.push(C("level", "수평", "good"));
+      const camUp = -orient.up; // 뒷카메라가 위를 보는 각도
+      if (full) {
+        if (camUp < -3) list.push(item("angle", false, "down", "무릎을 굽혀 폰을 낮춰주세요", "허리~무릎 높이에서 찍으면 다리가 길어 보여요", 2));
+        else if (camUp > 20) list.push(item("angle", false, "tiltFwd", "폰을 조금 세워요", "너무 올려 찍으면 얼굴이 작아져요", 2));
+        else list.push(item("angle", true));
+      } else {
+        if (camUp < -8) list.push(item("angle", false, "tiltBack", "폰을 똑바로 세워요", "내려 찍으면 비율이 짧아 보여요", 2));
+        else if (camUp > 12) list.push(item("angle", false, "tiltFwd", "폰을 똑바로 세워요", "올려 찍으면 턱이 커 보여요", 2));
+        else list.push(item("angle", true));
+      }
+      const r = orient.roll;
+      list.push(Math.abs(r) > 3 ? item("level", false, "level", "폰을 똑바로 맞춰요", `${r > 0 ? "왼쪽" : "오른쪽"}으로 기울었어요`, 4) : item("level", true));
     }
-    if (full) {
-      if (rearUp < -6) out.push(C("angle", "각도", "bad", "폰을 낮추고 살짝 위로", "내려 찍으면 다리가 짧아져요. 무릎을 굽혀 허리~무릎 높이에서", 0, 1.6));
-      else if (rearUp < -1) out.push(C("angle", "각도", "warn", "폰 윗부분을 살짝 뒤로", "카메라가 조금 위를 보게(0~12°)", 3, 1.6));
-      else if (rearUp <= 13) out.push(C("angle", "각도", "good"));
-      else if (rearUp <= 22) out.push(C("angle", "각도", "warn", "너무 올려 찍어요", "얼굴이 작아지고 턱이 커 보여요. 조금만 세워요", 3, 1.6));
-      else out.push(C("angle", "각도", "bad", "폰을 더 세워요", "하늘을 찍고 있어요", 1, 1.6));
-    } else {
-      if (rearUp < -10) out.push(C("angle", "각도", "bad", "폰을 세워요", "위에서 내려 찍으면 비율이 무너져요. 가슴 높이에서 수평으로", 1, 1.4));
-      else if (rearUp < -4) out.push(C("angle", "각도", "warn", "폰을 조금 더 세워요", "가슴~눈 높이에서 수평", 4, 1.4));
-      else if (rearUp <= 6) out.push(C("angle", "각도", "good"));
-      else if (rearUp <= 14) out.push(C("angle", "각도", "warn", "폰을 조금 숙여요", "올려 찍으면 턱이 커 보여요", 4, 1.4));
-      else out.push(C("angle", "각도", "bad", "폰을 수평으로", "너무 아래에서 찍고 있어요", 1, 1.4));
-    }
-  } else out.push(C("angle", "각도", "na"));
-
-  const p = r && r.landmarks && r.landmarks[0];
-  if (!p) {
-    out.push(C("body", "사람", "bad", aiFailed ? "" : "사람이 화면에 들어오게", full ? "머리부터 발끝까지" : "머리부터 허리까지", 0, 0));
-    out.push(brightnessCheck(null));
-    return out;
   }
-  const P = (k) => toCrop(p[PL[k]], c);
+  const p = result && result.landmarks && result.landmarks[0];
+  if (!p) { if (!aiFailed) list.push(item("body", false, "person", "찍을 사람이 화면에 나오게 해주세요", full ? "머리부터 발끝까지" : "머리부터 허리까지", 0)); return list; }
+  const P = (k) => toC(p[PL[k]], c);
   const vis = (k) => (p[PL[k]].visibility ?? 1) > 0.5;
-  const nose = P("nose"), eyeL = P("eyeL"), eyeR = P("eyeR"), shL = P("shL"), shR = P("shR");
-  const eyeY = (eyeL.y + eyeR.y) / 2;
-  const headTop = smooth("ht", eyeY - Math.abs(shL.x - shR.x) * 0.55); // 정수리 추정
-  const cx = smooth("pcx", (shL.x + shR.x) / 2);
-
-  // 가로 위치
-  const dx = cx - 0.5;
-  if (Math.abs(dx) > 0.2) out.push(C("pos", "위치", "bad", `폰을 ${dirPhone(dx)}으로 살짝 돌려요`, "사람을 가운데나 세로 3분할 선에", 3, 0.8));
-  else if (Math.abs(dx) > 0.12 && Math.abs(Math.abs(dx) - 0.167) > 0.05) out.push(C("pos", "위치", "warn", "사람을 가운데로", "", 7, 0.8));
-  else out.push(C("pos", "위치", "good"));
-
-  // 머리 위 여백
-  if (headTop < 0.015) out.push(C("head", "머리여백", "bad", "머리가 잘려요", full ? "한 걸음 뒤로 가요" : "폰을 살짝 올려요", 2, 1));
-  else if (headTop > (full ? 0.14 : 0.16)) out.push(C("head", "머리여백", "warn", full ? "머리 위가 너무 비어요" : "머리 위 여백을 줄여요", full ? "한 걸음 앞으로, 또는 줌을 살짝" : "폰을 살짝 내리거나 한 걸음 앞으로", 5, 1));
-  else out.push(C("head", "머리여백", "good"));
+  const eyeY = (P("eyeL").y + P("eyeR").y) / 2;
+  const shW = Math.abs(P("shL").x - P("shR").x);
+  const headTop = sm("ht", eyeY - shW * 0.55);
+  const cx = sm("pcx", (P("shL").x + P("shR").x) / 2);
 
   if (full) {
-    const footY = smooth("fy", Math.max(P("footL").y, P("footR").y, P("heelL").y, P("heelR").y));
-    const feetVis = vis("footL") || vis("footR") || vis("heelL") || vis("heelR");
-    const ankY = Math.max(P("ankL").y, P("ankR").y), kneeY = Math.max(P("kneeL").y, P("kneeR").y);
-    if (!feetVis || footY > 1.01) {
-      if (Math.abs(1 - ankY) < 0.05 || Math.abs(1 - kneeY) < 0.05) out.push(C("feet", "발끝", "bad", "발목·무릎에서 잘렸어요", "한 걸음 뒤로 가서 발끝까지 넣어요", 1, 1.6));
-      else out.push(C("feet", "발끝", "bad", "발끝이 안 보여요", "한 걸음 뒤로, 또는 폰을 낮춰요", 1, 1.6));
-    } else if (footY < 0.86) out.push(C("feet", "발끝", "bad", "발끝을 화면 맨 아래로", "폰을 더 낮추면 발끝이 내려가고 다리가 길어 보여요", 1, 1.6));
-    else if (footY < 0.93) out.push(C("feet", "발끝", "warn", "발끝을 조금 더 아래로", "아래 초록선에 발끝을 붙여요", 4, 1.6));
-    else out.push(C("feet", "발끝", "good"));
-
-    // 사람 크기 (화면 세로를 채우는 정도)
-    const bodyH = (ema.fy ?? footY) - headTop;
-    if (bodyH < 0.62) out.push(C("size", "크기", "warn", "한두 걸음 앞으로", "사람이 작게 나와요. 화면 세로를 꽉 채워요", 6, 1));
-    else out.push(C("size", "크기", "good"));
+    const footY = sm("fy", Math.max(P("footL").y, P("footR").y, P("heelL").y, P("heelR").y));
+    const feetIn = (vis("footL") || vis("footR") || vis("heelL") || vis("heelR")) && footY < 1.01;
+    if (!feetIn) list.push(item("feet", false, "far", "한 걸음 뒤로 가주세요", "발끝까지 다 나오게", 3));
+    else if (footY < 0.9) list.push(item("feet", false, "down", "폰을 더 낮춰주세요", "발끝이 화면 맨 아래에 닿게", 3));
+    else list.push(item("feet", true));
+    if (headTop < 0.01) list.push(item("head", false, "far", "한 걸음 뒤로 가주세요", "머리가 잘려요", 3));
+    else if (feetIn && footY - headTop < 0.65) list.push(item("size", false, "near", "한 걸음 앞으로 가주세요", "사람이 너무 작게 나와요", 5));
+    else list.push(item("head", true));
   } else {
-    // 상반신: 프레임 아래 가장자리가 관절(팔꿈치·손목)에 걸리지 않게, 눈은 위 1/3
-    const ey = smooth("pey", eyeY);
-    if (ey > 0.45) out.push(C("eye", "눈높이", "warn", "폰을 살짝 내려요", "눈이 위쪽 1/3 선에 오게", 5, 1));
-    else if (ey < 0.18) out.push(C("eye", "눈높이", "bad", "폰을 살짝 올려요", "", 3, 1));
-    else out.push(C("eye", "눈높이", "good"));
+    const ey = sm("pey", eyeY);
+    list.push(headTop < 0.01 ? item("head", false, "far", "한 걸음 뒤로 가주세요", "머리가 잘려요", 3)
+            : ey > 0.45 ? item("eye", false, "near", "한 걸음 앞으로 가주세요", "얼굴이 화면 위쪽에 오게", 5)
+            : item("eye", true));
     const elbowY = Math.max(P("elL").y, P("elR").y);
-    const hipY = Math.min(P("hipL").y, P("hipR").y);
-    if (Math.abs(1 - elbowY) < 0.04) out.push(C("cut", "자르는곳", "warn", "팔꿈치에서 잘려요", "조금 앞으로(가슴 아래) 또는 뒤로(허리) 가요", 5, 0.8));
-    else if (hipY < 0.98 && hipY > 0.85) out.push(C("cut", "자르는곳", "good"));
-    else out.push(C("cut", "자르는곳", "good"));
+    list.push(Math.abs(1 - elbowY) < 0.04 ? item("cut", false, "near", "반 걸음 앞으로 가주세요", "팔꿈치에서 잘리지 않게", 6, true) : item("cut", true));
   }
-
-  const xs = [shL.x, shR.x];
-  const fw = Math.abs(shL.x - shR.x) * 0.45;
-  out.push(brightnessCheck({ x0: nose.x - fw, x1: nose.x + fw, y0: eyeY - fw * 1.2, y1: eyeY + fw * 1.5 }));
-  return out;
+  const dx = cx - 0.5;
+  list.push(Math.abs(dx) > 0.15 ? item("pos", false, side(dx), `폰을 ${sideKo(dx)}으로 살짝 돌려요`, "사람이 가운데 오게", 4) : item("pos", true));
+  const nose = P("nose"), hw = shW * 0.4;
+  const li = lightItem({ x0: nose.x - hw, x1: nose.x + hw, y0: eyeY - hw, y1: eyeY + hw * 1.4 });
+  if (li) list.push(li);
+  return list;
 }
 
-// ---------- 밝기 샘플 ----------
-const sampleCv = document.createElement("canvas");
-sampleCv.width = 48; sampleCv.height = 64;
-const sctx = sampleCv.getContext("2d", { willReadFrequently: true });
-let lastBright = null, lastBrightAt = 0;
-function sampleBrightness(region) {
+// ---------- 밝기 ----------
+const sCv = Object.assign(document.createElement("canvas"), { width: 48, height: 64 });
+const sCtx = sCv.getContext("2d", { willReadFrequently: true });
+let bCache = null, bAt = 0;
+function brightness(reg) {
   const now = performance.now();
-  if (now - lastBrightAt < 500 && lastBright && !region === !lastBright.region) return lastBright;
-  const c = cropInfo(); if (!c) return null;
-  sctx.drawImage(video, c.ox, c.oy, c.cw, c.ch, 0, 0, 48, 64);
-  const d = sctx.getImageData(0, 0, 48, 64).data;
-  let all = 0, face = 0, fn = 0;
+  if (bCache && now - bAt < 600) return bCache;
+  const c = crop(); if (!c) return null;
+  sCtx.drawImage(video, c.ox, c.oy, c.cw, c.ch, 0, 0, 48, 64);
+  const d = sCtx.getImageData(0, 0, 48, 64).data;
+  let all = 0, face = 0, n = 0;
   for (let y = 0; y < 64; y++) for (let x = 0; x < 48; x++) {
     const i = (y * 48 + x) * 4, l = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
     all += l;
-    if (region && x / 48 >= region.x0 && x / 48 <= region.x1 && y / 64 >= region.y0 && y / 64 <= region.y1) { face += l; fn++; }
+    if (reg && x / 48 >= reg.x0 && x / 48 <= reg.x1 && y / 64 >= reg.y0 && y / 64 <= reg.y1) { face += l; n++; }
   }
-  lastBright = { all: all / (48 * 64), face: fn ? face / fn : all / (48 * 64), region: !!region };
-  lastBrightAt = now;
-  return lastBright;
+  bCache = { all: all / 3072, face: n ? face / n : all / 3072 }; bAt = now;
+  return bCache;
 }
 
-// ---------- 메인 루프 ----------
-let checks = [];
+// ---------- 루프 ----------
 function loop(t) {
   requestAnimationFrame(loop);
   if ($("#cam").hidden || !video.videoWidth) return;
-  const c = cropInfo();
+  const c = crop();
   const lm = mode === "selfie" ? faceLm : poseLm;
-  if (lm && t - lastDetect > 66 && video.readyState >= 2) {
+  if (lm && t - lastDetect > 70 && video.readyState >= 2) {
     lastDetect = t;
-    try { lastResult = mode === "selfie" ? lm.detectForVideo(video, t) : lm.detectForVideo(video, t); } catch (e) { console.warn(e); }
+    try { result = lm.detectForVideo(video, t); } catch (e) { console.warn(e); }
   }
-  checks = mode === "selfie" ? selfieChecks(lastResult, c) : personChecks(lastResult, c, mode === "full");
-  draw(c);
-  coach(t);
+  checks = mode === "selfie" ? selfieItems(c) : personItems(c, mode === "full");
+  guide(t);
+  draw();
 }
 requestAnimationFrame(loop);
 
-function scoreOf(list) {
-  let s = 0, w = 0;
-  for (const k of list) { if (k.s === "na" || !k.w) continue; w += k.w; s += k.w * (k.s === "good" ? 1 : k.s === "warn" ? 0.55 : 0); }
-  const missing = list.find((k) => (k.key === "face" || k.key === "body") && k.s === "bad");
-  return missing ? 0 : w ? Math.round((s / w) * 100) : 0;
+function guide(t) {
+  const hard = checks.filter((k) => !k.ok && !k.soft).sort((a, b) => a.order - b.order);
+  const softs = checks.filter((k) => !k.ok && k.soft).sort((a, b) => a.order - b.order);
+  const ready = checks.length > 0 && hard.length === 0;
+
+  // 진행 점: 맞춘 항목 수
+  const dots = $("#dots");
+  const html = checks.map((k) => `<i class="${k.ok || k.soft ? "ok" : ""}"></i>`).join("");
+  if (dots._h !== html) { dots.innerHTML = html; dots._h = html; }
+
+  let icon, main, sub;
+  if (ready) { icon = "check"; main = "좋아요! 지금 찍으세요"; sub = softs[0] ? `더 예쁘게: ${softs[0].main}` : ""; }
+  else { const k = hard[0]; icon = k.icon; main = k.main; sub = k.sub; }
+
+  // 글자가 깜빡이지 않게 0.5초 유지될 때만 바꿈
+  if (main !== cand) { cand = main; candAt = t; }
+  if (main !== shown && (t - candAt > 500 || !shown)) { shown = main; show(icon, main, sub, ready); say(main); }
+
+  $("#shutter").classList.toggle("go", ready);
+  $("#frameGlow").classList.toggle("on", ready);
+
+  if (opts.auto && ready) {
+    if (!readySince) readySince = t;
+    if (t - readySince > 1200 && !autoBusy) { autoBusy = true; capture().finally(() => { autoBusy = false; readySince = 0; }); }
+  } else readySince = 0;
 }
 
-function coach(t) {
-  const score = scoreOf(checks);
-  // 체크 목록
-  const box = $("#checks");
-  const html = checks.filter((k) => k.label && k.key !== "face" && k.key !== "body" && k.key !== "vert")
-    .map((k) => `<div class="chk ${k.s}"><i></i>${k.label}</div>`).join("");
-  if (box._h !== html) { box.innerHTML = html; box._h = html; }
-  // 점수 링
-  const ring = $("#scoreRing");
-  ring.style.strokeDashoffset = 289 * (1 - score / 100);
-  ring.style.stroke = score >= 85 ? "var(--good)" : score >= 60 ? "var(--warn)" : "var(--bad)";
-  $("#scoreNum").textContent = score;
-
-  const issues = checks.filter((k) => (k.s === "bad" || k.s === "warn") && k.msg).sort((a, b) => (a.s === b.s ? a.pr - b.pr : a.s === "bad" ? -1 : 1));
-  const allGood = !issues.some((k) => k.s === "bad") && score >= 85;
-  let main, sub;
-  if (allGood) {
-    main = "지금 찍으세요!";
-    sub = issues[0] ? `더 좋게: ${issues[0].msg}` : poseTip();
-  } else if (issues[0]) { main = issues[0].msg; sub = issues[0].sub; }
-  else { main = "잠깐만요…"; sub = ""; }
-
-  // 메시지가 깜빡이지 않게 0.45초 유지될 때만 바꿈
-  if (main !== candMsg) { candMsg = main; candSince = t; }
-  if (main !== shownMsg && (t - candSince > 450 || !shownMsg)) {
-    shownMsg = main;
-    setCoach(main, sub, allGood);
-    speak(main);
-  } else if (main === shownMsg) $("#coachSub").textContent = sub;
-
-  // 자동 촬영
-  if (opts.auto && allGood) {
-    if (!goodSince) goodSince = t;
-    if (t - goodSince > 1000 && !autoBusy) { autoBusy = true; burst().finally(() => { autoBusy = false; goodSince = 0; }); }
-  } else goodSince = 0;
+function show(icon, main, sub, go) {
+  const ic = $("#cardIcon");
+  ic.innerHTML = `<svg viewBox="0 0 24 24">${ICON[icon] || ICON.wait}</svg>`;
+  const n = NUDGE[icon];
+  ic.classList.toggle("move", !!n);
+  if (n) { ic.style.setProperty("--nx", n[0] + "px"); ic.style.setProperty("--ny", n[1] + "px"); }
+  $("#cardMain").textContent = main;
+  $("#cardSub").textContent = sub || "";
+  $("#card").classList.toggle("go", !!go);
 }
 
-let tipIdx = 0, tipAt = 0;
-function poseTip() {
-  const tips = {
-    selfie: ["눈에 살짝 힘 빼고 입꼬리만 올려요", "턱을 앞으로 살짝 내밀면 턱선이 살아요", "화면 말고 렌즈를 봐요"],
-    half: ["어깨를 카메라에서 살짝 비스듬히", "팔을 몸에서 조금 떼면 팔이 얇아 보여요", "턱은 살짝 앞으로, 눈은 렌즈"],
-    full: ["한쪽 다리를 앞으로 내밀고 발끝은 카메라 쪽", "몸은 살짝 사선, 무게는 뒷다리에", "걷는 척 한 발 내딛는 순간에 찍어요"],
-  }[mode];
+function say(text) {
+  if (!opts.voice || !("speechSynthesis" in window)) return;
   const now = performance.now();
-  if (now - tipAt > 4000) { tipIdx = (tipIdx + 1) % tips.length; tipAt = now; }
-  return "포즈 팁: " + tips[tipIdx];
-}
-
-function setCoach(main, sub, good) {
-  $("#coachMain").textContent = main;
-  $("#coachSub").textContent = sub || "";
-  $("#coach").classList.toggle("good", !!good);
-}
-
-function speak(text) {
-  if (!opts.voice || !("speechSynthesis" in window) || !text) return;
-  const now = performance.now();
-  if (text === lastSpoken && now - lastSpeakAt < 6000) return;
-  if (now - lastSpeakAt < 1800) return;
+  if ((text === lastSpoken && now - lastSpeakAt < 6000) || now - lastSpeakAt < 1800) return;
   lastSpoken = text; lastSpeakAt = now;
   speechSynthesis.cancel();
-  const u = new SpeechSynthesisUtterance(text.replace("!", ""));
-  u.lang = "ko-KR"; u.rate = 1.1;
+  const u = new SpeechSynthesisUtterance(text); u.lang = "ko-KR"; u.rate = 1.05;
   speechSynthesis.speak(u);
 }
 
-// ---------- 오버레이 그리기 ----------
-function draw(c) {
-  const w = frameBox.w, h = frameBox.h;
+// 지금 안내 중인 항목에 필요한 선 하나만 그림
+function draw() {
+  const w = box.w, h = box.h;
   ctx.clearRect(0, 0, w, h);
-  const mirror = facing === "user";
-  const X = (x) => (mirror ? 1 - x : x) * w, Y = (y) => y * h;
-
-  if (opts.grid) {
-    ctx.strokeStyle = "rgba(255,255,255,.28)"; ctx.lineWidth = 1;
-    ctx.beginPath();
-    for (const f of [1 / 3, 2 / 3]) { ctx.moveTo(w * f, 0); ctx.lineTo(w * f, h); ctx.moveTo(0, h * f); ctx.lineTo(w, h * f); }
-    ctx.stroke();
-  }
-
-  const st = (k) => (checks.find((x) => x.key === k) || {}).s;
-  const col = (s) => (s === "good" ? "#5ee6a0" : s === "warn" ? "#ffd166" : s === "bad" ? "#ff6b6b" : "rgba(255,255,255,.5)");
-
-  // 목표 가이드선
-  ctx.setLineDash([8, 6]); ctx.lineWidth = 2;
-  if (mode === "selfie") {
-    ctx.strokeStyle = col(st("eye"));
-    line(0.27 * h); line(0.43 * h);
-    label("눈은 이 사이", 0.27 * h - 6, col(st("eye")));
-  } else if (mode === "full") {
-    ctx.strokeStyle = col(st("feet"));
-    line(0.965 * h);
-    label("발끝을 여기에", 0.965 * h - 8, col(st("feet")));
-    ctx.strokeStyle = col(st("head"));
-    line(0.06 * h);
-  } else {
-    ctx.strokeStyle = col(st("eye"));
-    line(h / 3);
-    label("눈높이", h / 3 - 6, col(st("eye")));
-  }
+  const now = checks.find((k) => !k.ok && !k.soft && k.main === shown);
+  if (!now) return;
+  ctx.lineWidth = 3; ctx.setLineDash([10, 8]); ctx.strokeStyle = "rgba(255,255,255,.9)";
+  const hline = (y) => { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); };
+  if (now.key === "eye" && mode === "selfie") hline(h * 0.35);
+  if (now.key === "feet") hline(h * 0.96);
   ctx.setLineDash([]);
-
-  // 수평계 (후면 촬영)
-  if (orient && mode !== "selfie" && !orient.landscape) {
-    const a = (orient.roll * Math.PI) / 180, L = w * 0.22, cx = w / 2, cy = h / 2;
-    ctx.strokeStyle = "rgba(255,255,255,.5)"; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(cx - L - 14, cy); ctx.lineTo(cx - L, cy); ctx.moveTo(cx + L, cy); ctx.lineTo(cx + L + 14, cy); ctx.stroke();
-    ctx.strokeStyle = col(st("level")); ctx.lineWidth = 3;
+  if (now.key === "level" && orient) {
+    const a = (orient.roll * Math.PI) / 180, L = w * 0.3, cx = w / 2, cy = h / 2;
+    ctx.strokeStyle = "rgba(255,255,255,.5)"; hline(cy);
+    ctx.strokeStyle = "#ffcc4d"; ctx.lineWidth = 4;
     ctx.beginPath(); ctx.moveTo(cx - L * Math.cos(a), cy - L * Math.sin(a)); ctx.lineTo(cx + L * Math.cos(a), cy + L * Math.sin(a)); ctx.stroke();
   }
-
-  // 각도 게이지 (오른쪽)
-  if (orient && !orient.landscape) {
-    const v = -orient.up; // 셀카: 내려다보는 각도, 후면: 올려보는 각도
-    const [lo, hi] = mode === "selfie" ? [9, 27] : mode === "full" ? [-1, 13] : [-4, 6];
-    const gx = w - 22, gy0 = h * 0.3, gh = h * 0.4, range = 40;
-    const toY = (deg) => gy0 + gh / 2 - (deg / range) * (gh / 2) * (mode === "selfie" ? -1 : 1);
-    ctx.fillStyle = "rgba(0,0,0,.4)"; roundRect(gx - 6, gy0, 12, gh, 6); ctx.fill();
-    ctx.fillStyle = "rgba(94,230,160,.45)";
-    const ya = toY(lo), yb = toY(hi); ctx.fillRect(gx - 6, Math.min(ya, yb), 12, Math.abs(yb - ya));
-    const yv = Math.max(gy0, Math.min(gy0 + gh, toY(Math.max(-range, Math.min(range, v)))));
-    ctx.fillStyle = col(st("angle")); ctx.beginPath(); ctx.arc(gx, yv, 8, 0, Math.PI * 2); ctx.fill();
-    ctx.font = "600 11px system-ui"; ctx.textAlign = "right"; ctx.fillStyle = "rgba(255,255,255,.85)";
-    ctx.fillText("각도", gx + 8, gy0 - 8);
-  }
-
-  // 인식 점
-  if (opts.dots && lastResult && c) {
-    ctx.fillStyle = "rgba(255,179,138,.9)";
-    const pts = mode === "selfie" ? (lastResult.faceLandmarks || [])[0] : (lastResult.landmarks || [])[0];
-    if (pts) for (let i = 0; i < pts.length; i += mode === "selfie" ? 6 : 1) { const p = toCrop(pts[i], c); ctx.fillRect(X(p.x) - 1.5, Y(p.y) - 1.5, 3, 3); }
-  }
-
-  function line(y) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
-  function label(t, y, color) {
-    ctx.font = "700 12px system-ui"; ctx.textAlign = "left";
-    const tw = ctx.measureText(t).width;
-    ctx.fillStyle = "rgba(0,0,0,.5)"; roundRect(8, y - 15, tw + 12, 19, 6); ctx.fill();
-    ctx.fillStyle = color; ctx.fillText(t, 14, y - 1);
-  }
-  function roundRect(x, y, ww, hh, r) { ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x, y, ww, hh, r) : ctx.rect(x, y, ww, hh); }
 }
 
 // ---------- 촬영 ----------
-$("#shutter").onclick = () => capture();
-async function capture() {
-  const c = cropInfo(); if (!c) return;
-  const score = scoreOf(checks);
-  const cv = document.createElement("canvas");
-  cv.width = Math.round(c.cw); cv.height = Math.round(c.ch);
+$("#shutter").onclick = () => capture(true);
+async function capture(showReview = false) {
+  const c = crop(); if (!c) return;
+  const good = checks.length > 0 && !checks.some((k) => !k.ok && !k.soft);
+  const cv = Object.assign(document.createElement("canvas"), { width: Math.round(c.cw), height: Math.round(c.ch) });
   const g = cv.getContext("2d");
   if (facing === "user" && opts.mirror) { g.translate(cv.width, 0); g.scale(-1, 1); }
   g.drawImage(video, c.ox, c.oy, c.cw, c.ch, 0, 0, cv.width, cv.height);
   const blob = await new Promise((r) => cv.toBlob(r, "image/jpeg", 0.95));
   if (!blob) return;
-  const url = URL.createObjectURL(blob);
-  shots.push({ blob, url, score, at: Date.now() });
-  $("#thumbImg").src = url;
+  const shot = { blob, url: URL.createObjectURL(blob), good, at: Date.now() };
+  shots.push(shot);
+  $("#thumbImg").src = shot.url;
   const fl = $("#flash"); fl.classList.add("on"); setTimeout(() => fl.classList.remove("on"), 60);
   if (navigator.vibrate) navigator.vibrate(30);
-  toast(score >= 85 ? `${score}점! 잘 찍혔어요` : `${score}점 · 안내를 따라 한 장 더?`);
+  if (showReview || opts.auto) openReview(shot);
 }
-async function burst() { for (let i = 0; i < 3; i++) { await capture(); await new Promise((r) => setTimeout(r, 350)); } }
 
-// ---------- 갤러리 ----------
-$("#galleryBtn").onclick = () => { renderGallery(); $("#gallery").hidden = false; };
-$("#closeGallery").onclick = () => ($("#gallery").hidden = true);
-$("#clearGallery").onclick = () => { shots.forEach((s) => URL.revokeObjectURL(s.url)); shots = []; $("#thumbImg").removeAttribute("src"); renderGallery(); };
-function renderGallery() {
-  const g = $("#galleryGrid");
-  if (!shots.length) { g.innerHTML = '<div class="g-empty">아직 찍은 사진이 없어요</div>'; return; }
-  g.innerHTML = "";
-  [...shots].sort((a, b) => b.score - a.score).forEach((s) => {
-    const d = document.createElement("div"); d.className = "g-item";
-    d.innerHTML = `<img alt="찍은 사진"><span class="g-score">${s.score}점</span><button class="g-save">저장</button>`;
-    d.querySelector("img").src = s.url;
-    d.querySelector(".g-save").onclick = () => saveShot(s);
-    g.appendChild(d);
-  });
+function openReview(shot) {
+  current = shot;
+  $("#reviewImg").src = shot.url;
+  $("#reviewMsg").textContent = shot.good ? "잘 나왔어요!" : "안내대로 맞추면 더 예쁘게 나와요";
+  $("#review").hidden = false;
 }
-async function saveShot(s) {
+$("#retake").onclick = () => ($("#review").hidden = true);
+$("#saveBtn").onclick = async () => { if (current) { await save(current); $("#review").hidden = true; } };
+
+async function save(s) {
   const name = `insaengshot_${new Date(s.at).toISOString().replace(/[-:T]/g, "").slice(0, 14)}.jpg`;
   const file = new File([s.blob], name, { type: "image/jpeg" });
   if (navigator.canShare && navigator.canShare({ files: [file] })) {
-    try { await navigator.share({ files: [file] }); return; } catch (e) { if (e.name === "AbortError") return; }
+    try { await navigator.share({ files: [file] }); toast("'이미지 저장'을 누르면 사진첩에 들어가요"); return; }
+    catch (e) { if (e.name === "AbortError") return; }
   }
-  const a = document.createElement("a"); a.href = s.url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  const a = Object.assign(document.createElement("a"), { href: s.url, download: name });
+  document.body.appendChild(a); a.click(); a.remove();
+  toast("저장했어요");
 }
 
+$("#galleryBtn").onclick = () => {
+  const g = $("#galleryGrid");
+  g.innerHTML = shots.length ? "" : '<p class="empty">아직 찍은 사진이 없어요</p>';
+  [...shots].reverse().forEach((s) => {
+    const b = document.createElement("button");
+    b.innerHTML = '<img alt="찍은 사진">'; b.firstChild.src = s.url;
+    b.onclick = () => { $("#gallery").hidden = true; openReview(s); };
+    g.appendChild(b);
+  });
+  $("#gallery").hidden = false;
+};
+$("#closeGallery").onclick = () => ($("#gallery").hidden = true);
+
 // ---------- 설정 ----------
-const bind = (id, key) => { const el = $(id); if (el.type === "checkbox") el.checked = opts[key]; else el.value = opts[key];
-  el.onchange = () => { opts[key] = el.type === "checkbox" ? el.checked : el.value; saveOpts(); if (key === "ratio") layout(); if (key === "voice" && !opts.voice) speechSynthesis?.cancel(); }; };
-bind("#optVoice", "voice"); bind("#optAuto", "auto"); bind("#optGrid", "grid"); bind("#optDots", "dots");
-bind("#optMirror", "mirror"); bind("#optRatio", "ratio"); bind("#optTurn", "turn");
+const bind = (id, key) => {
+  const el = $(id);
+  if (el.type === "checkbox") el.checked = opts[key]; else el.value = opts[key];
+  el.onchange = () => { opts[key] = el.type === "checkbox" ? el.checked : el.value; saveOpts(); if (key === "ratio") layout(); if (key === "voice" && !opts.voice && window.speechSynthesis) speechSynthesis.cancel(); };
+};
+bind("#optVoice", "voice"); bind("#optAuto", "auto"); bind("#optMirror", "mirror"); bind("#optRatio", "ratio");
 $("#settingsBtn").onclick = () => ($("#settings").hidden = false);
 $("#closeSettings").onclick = () => ($("#settings").hidden = true);
-const openTips = () => ($("#tips").hidden = false);
-$("#openTips").onclick = openTips; $("#tipsFromSettings").onclick = () => { $("#settings").hidden = true; openTips(); };
-$("#closeTips").onclick = () => ($("#tips").hidden = true);
-document.querySelectorAll(".sheet").forEach((s) => s.addEventListener("click", (e) => { if (e.target === s) s.hidden = true; }));
+$("#showHowto").onclick = () => { $("#settings").hidden = true; $("#howto").hidden = false; };
+document.querySelectorAll(".sheet").forEach((s) => s.addEventListener("click", (e) => { if (e.target === s && s.id !== "howto") s.hidden = true; }));
 
 let toastT;
-function toast(msg) { const t = $("#toast"); t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => (t.hidden = true), 2200); }
+function toast(msg) { const t = $("#toast"); t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => (t.hidden = true), 2500); }
 
 // 화면 꺼짐 방지
-async function wake() { try { if ("wakeLock" in navigator && !$("#cam").hidden) await navigator.wakeLock.request("screen"); } catch {} }
-document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") wake(); });
-$("#cam").addEventListener("click", wake, { once: true });
+async function wake() { try { if ("wakeLock" in navigator) await navigator.wakeLock.request("screen"); } catch {} }
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && !$("#cam").hidden) wake(); });
+document.addEventListener("click", wake, { once: true });
 
-// 오프라인 설치용
 if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(() => {});
