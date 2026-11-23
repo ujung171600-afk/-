@@ -5,7 +5,7 @@
 // 얼굴·몸 인식(MediaPipe)은 휴대폰 안에서만 돌고 사진은 밖으로 나가지 않는다.
 
 import { FilesetResolver, FaceLandmarker, PoseLandmarker } from "./vendor/vision_bundle.mjs";
-import { createBeauty, faceShape, PRESETS } from "./beauty.js";
+import { createBeauty, faceShape, PRESETS } from "./beauty.js?v=7";
 
 const $ = (s) => document.querySelector(s);
 const video = $("#video"), view = $("#view"), overlay = $("#overlay"), ctx = overlay.getContext("2d");
