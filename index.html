@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
-<link rel="stylesheet" href="style.css?v=7">
+<link rel="stylesheet" href="style.css?v=8">
 </head>
 <body>
 
@@ -26,7 +26,7 @@
     <div class="pick">
       <button class="pick-card" data-mode="selfie">
         <span class="pic"><svg viewBox="0 0 80 100"><rect x="2" y="2" width="76" height="96" rx="10" class="frame"/><ellipse cx="40" cy="42" rx="17" ry="22" class="ghost"/><path d="M14 98c4-16 14-24 26-24s22 8 26 24" class="body"/></svg></span>
-        <span class="txt"><b>셀카</b><small>얼굴은 작고 갸름하게</small></span>
+        <span class="txt"><b>셀카</b><small>위에서 살짝 내려다보는 각도</small></span>
       </button>
       <button class="pick-card" data-mode="half">
         <span class="pic"><svg viewBox="0 0 80 100"><rect x="2" y="2" width="76" height="96" rx="10" class="frame"/><ellipse cx="40" cy="30" rx="10" ry="13" class="ghost"/><path d="M12 98c2-30 14-48 28-48s26 18 28 48" class="body"/></svg></span>
@@ -37,7 +37,6 @@
         <span class="txt"><b>친구 전신</b><small>다리 길어 보이게</small></span>
       </button>
     </div>
-    <p class="ver">버전 7</p>
   </div>
 </section>
 
@@ -70,12 +69,13 @@
     <div id="say" class="say">
       <b id="sayMain">카메라 켜는 중…</b>
       <span id="saySub"></span>
+      <button id="retryBtn" class="primary retry" hidden>다시 시도</button>
     </div>
-    <button id="beautyBtn" class="chip">뽀샵 <b id="beautyName">피부결 정돈</b></button>
+    <button id="beautyBtn" class="chip" aria-label="뽀샵 바꾸기">뽀샵 <b id="beautyName">피부결 정돈</b><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
     <div class="controls">
       <button id="galleryBtn" class="thumb" aria-label="찍은 사진"><img id="thumbImg" alt=""></button>
-      <button id="shutter" class="shutter" aria-label="찍기"><span></span></button>
-      <button id="flipBtn" class="round big" aria-label="카메라 바꾸기"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.5-4.5M4 13a8 8 0 0 0 14.5 4.5"/><path d="M5 3v4h4M19 21v-4h-4"/></svg></button>
+      <button id="shutter" class="shutter" aria-label="찍기" disabled><span></span></button>
+      <span class="spacer" aria-hidden="true"></span>
     </div>
   </div>
 </section>
@@ -87,15 +87,15 @@
     <div class="how">
       <div class="how-item">
         <svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="24" class="ring"/><circle cx="32" cy="32" r="8" class="tgt"/><circle cx="32" cy="32" r="5" class="ballg"/></svg>
-        <p><b>1. 각도</b>폰을 기울여 공을 가운데로</p>
+        <p><b>1. 각도</b>폰을 기울여 노란 공을 가운데로</p>
       </div>
       <div class="how-item">
         <svg viewBox="0 0 64 64"><ellipse cx="32" cy="30" rx="15" ry="19" class="dash"/><ellipse cx="32" cy="30" rx="12" ry="16" class="live"/></svg>
-        <p><b>2. 위치</b>얼굴을 점선 안에</p>
+        <p><b>2. 위치</b>노란 원을 점선 안에</p>
       </div>
       <div class="how-item">
-        <svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="24" class="go"/><circle cx="32" cy="32" r="17" fill="#fff"/></svg>
-        <p><b>3. 찰칵</b>초록색이 되면 셔터를 눌러요</p>
+        <svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="24" class="go"/><circle cx="32" cy="32" r="17" class="go-in"/></svg>
+        <p><b>3. 찰칵</b>초록색이 되면 직접 눌러요</p>
       </div>
     </div>
     <button id="howtoOk" class="primary wide">시작하기</button>
@@ -120,10 +120,12 @@
 <div id="review" class="sheet dark" hidden>
   <div class="review">
     <img id="reviewImg" alt="방금 찍은 사진">
+    <p id="reviewHint" class="review-hint" aria-live="polite"></p>
     <div class="row2">
       <button id="retake" class="ghost">다시 찍기</button>
-      <button id="saveBtn" class="primary">사진첩에 저장</button>
+      <button id="saveBtn" class="primary">사진첩에 저장<small>다음 화면에서 '이미지 저장'</small></button>
     </div>
+    <p class="review-note">저장 안 한 사진은 앱을 닫으면 사라져요</p>
   </div>
 </div>
 
@@ -147,11 +149,13 @@
     </label>
     <button id="showHowto" class="ghost wide">사용법 다시 보기</button>
     <button id="closeSettings" class="primary wide">닫기</button>
+    <p class="ver">버전 8</p>
   </div>
 </div>
 
-<div id="toast" class="toast" hidden></div>
+<div id="toast" class="toast" role="status" hidden></div>
+<div class="turn" aria-hidden="true">폰을 세로로 돌려주세요</div>
 
-<script type="module" src="app.js?v=7"></script>
+<script type="module" src="app.js?v=8"></script>
 </body>
 </html>
