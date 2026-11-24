@@ -1,11 +1,11 @@
 // 인생샷 코치 — 3단계 카메라
-//  1. 각도: 오른쪽 위 공을 가운데 원에 넣는다 (폰 기울기)
+//  1. 각도: 화면 가운데 공을 원에 넣는다 (폰 기울기). 맞으면 공은 오른쪽 위로 작아진다
 //  2. 위치: 내 얼굴/몸(노란선)을 흰 점선 안에 넣는다
 //  3. 찰칵: 둘 다 맞으면 초록색 — 셔터는 직접 누른다
 // 얼굴·몸 인식(MediaPipe)은 휴대폰 안에서만 돌고 사진은 밖으로 나가지 않는다.
 
 import { FilesetResolver, FaceLandmarker, PoseLandmarker } from "./vendor/vision_bundle.mjs";
-import { createBeauty, PRESETS } from "./beauty.js?v=9";
+import { createBeauty, PRESETS } from "./beauty.js?v=10";
 
 const $ = (s) => document.querySelector(s);
 const video = $("#video"), view = $("#view"), overlay = $("#overlay"), ctx = overlay.getContext("2d");
@@ -38,6 +38,9 @@ let st = { angle: false, pos: false, tip: "" }, wasReady = false;
 let shots = [], current = null, saving = false;
 let shownMain = "", cand = "", candAt = 0, lastSpoken = "", lastSpeakAt = 0;
 let live = null, target = null;
+let levelBig = true, angleBadAt = 0;   // 각도 단계 동안 공을 화면 가운데 크게
+let hintPending = false, hintLeft = 0, lastT = 0; // 친구 모드: 카메라 켤 때마다 3초 한 줄 안내 (화면이 실제로 그려진 시간 기준)
+let zoomLevels = [], zoomIdx = 0;
 const ema = {};
 const sm = (k, v, a = 0.35) => (ema[k] = ema[k] == null ? v : ema[k] + a * (v - ema[k]));
 const ratio = () => { const [a, b] = opts.ratio.split(":").map(Number); return a / b; };
@@ -57,19 +60,27 @@ document.querySelectorAll(".pick-card").forEach((b) =>
     }
     $("#start").hidden = true; $("#cam").hidden = false;
     setMode(b.dataset.mode);
-    if (!opts.seenHowto) $("#howto").hidden = false;
+    if (mode === "selfie" && !opts.seenHowto) $("#howto").hidden = false;
   })
 );
 $("#howtoOk").onclick = () => { $("#howto").hidden = true; opts.seenHowto = true; saveOpts(); };
-$("#backBtn").onclick = () => { stopCamera(); $("#cam").hidden = true; $("#start").hidden = false; };
+$("#backBtn").onclick = () => { stopCamera(); hideHint(); $("#cam").hidden = true; $("#start").hidden = false; };
 $("#retryBtn").onclick = () => startCamera();
 
 function setMode(m) {
   mode = m; facing = MODES[m].cam;
   for (const k in ema) delete ema[k];
   result = null; shownMain = ""; cand = ""; wasReady = false;
+  levelBig = true; angleBadAt = 0; st.angle = false; st.pos = false;
+  $("#levelBox").classList.add("big", "instant");
+  hideHint(); hintPending = m !== "selfie";
   relayout(); startCamera(); getLm(MODES[m].ai);
 }
+
+// 친구 모드 한 줄 안내 (3초, 누르면 닫힘)
+function showHint() { hintPending = false; hintLeft = 3000; $("#modeHint").hidden = false; }
+function hideHint() { hintLeft = 0; $("#modeHint").hidden = true; }
+$("#modeHint").onclick = hideHint;
 
 // ---------- 카메라 ----------
 async function startCamera() {
@@ -79,7 +90,12 @@ async function startCamera() {
   say("카메라 켜는 중…", "", false, true);
   let s;
   try {
-    s = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: facing }, width: { ideal: 1920 }, height: { ideal: 1440 } } });
+    // 가능하면 고해상도(12MP), 안 되면 예전 해상도로
+    try { s = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: facing }, width: { ideal: 4032 }, height: { ideal: 3024 } } }); }
+    catch (e) {
+      if (e && (e.name === "NotAllowedError" || e.name === "SecurityError")) throw e;
+      s = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: facing }, width: { ideal: 1920 }, height: { ideal: 1440 } } });
+    }
   } catch {
     if (gen === camGen) {
       say("카메라를 켤 수 없어요", "설정 앱 → Safari → 카메라를 '허용'으로 바꾼 뒤 아래 버튼을 눌러요", false, true);
@@ -92,25 +108,57 @@ async function startCamera() {
   s.getVideoTracks()[0].addEventListener("ended", () => { if (stream === s && !$("#cam").hidden) startCamera(); });
   await video.play().catch(() => {});
   $("#shutter").disabled = false;
+  setupZoom(s.getVideoTracks()[0]);
   relayout();
+  if (hintPending) showHint();
 }
 function stopCamera() {
   camGen++;
   if (stream) stream.getTracks().forEach((t) => t.stop());
   stream = null; video.srcObject = null; $("#shutter").disabled = true;
+  zoomLevels = []; $("#zoomBtn").hidden = true;
 }
 
-// 위 막대와 아래 안내 사이에 사진 영역을 맞춘다 (아이폰 노치·홈바 포함)
+// ---------- 배율 (폰이 지원할 때만) ----------
+function setupZoom(track) {
+  zoomLevels = []; zoomIdx = 0;
+  let z = null;
+  try { z = track && track.getCapabilities && track.getCapabilities().zoom; } catch {}
+  if (z && typeof z.min === "number" && typeof z.max === "number") {
+    if (z.min <= 0.5) zoomLevels.push(0.5);
+    if (z.min <= 1 && z.max >= 1) zoomLevels.push(1);
+    if (z.max >= 2) zoomLevels.push(2);
+  }
+  if (zoomLevels.length < 2) { zoomLevels = []; $("#zoomBtn").hidden = true; return; }
+  zoomIdx = Math.max(0, zoomLevels.indexOf(1));
+  showZoom();
+  $("#zoomBtn").hidden = false;
+}
+function showZoom() {
+  const t = zoomLevels[zoomIdx] + "x", b = $("#zoomBtn");
+  b.textContent = t; b.setAttribute("aria-label", `배율 ${t}, 눌러서 바꾸기`);
+}
+$("#zoomBtn").onclick = async () => {
+  const track = stream && stream.getVideoTracks()[0];
+  if (!track || !zoomLevels.length) return;
+  const prev = zoomIdx;
+  zoomIdx = (zoomIdx + 1) % zoomLevels.length; showZoom();
+  try { await track.applyConstraints({ advanced: [{ zoom: zoomLevels[zoomIdx] }] }); }
+  catch { zoomIdx = prev; showZoom(); }
+};
+
+// 위 막대 바로 아래부터 사진 영역 (빈 띠 없이). 아래 안내와는 겹치지 않게 (아이폰 노치·홈바 포함)
 function layout() {
   const W = innerWidth, r = ratio();
   const topB = $(".top").getBoundingClientRect().bottom, botT = $(".bottom").getBoundingClientRect().top;
-  const avail = Math.max(120, botT - topB - 8);
+  const avail = Math.max(120, botT - topB - 6);
   let w = W, h = W / r;
   if (h > avail) { h = avail; w = h * r; }
-  const y = topB + (avail - h) / 2;
+  const y = topB;
   box = { x: (W - w) / 2, y, w, h };
   for (const el of [view, overlay, $("#glow")]) Object.assign(el.style, { left: box.x + "px", top: y + "px", width: w + "px", height: h + "px" });
-  $("#levelBox").style.top = y + 8 + "px";
+  $("#modeHint").style.top = y + 12 + "px";
+  placeLevel();
   const dpr = Math.min(devicePixelRatio || 1, 2);
   for (const c of [view, overlay]) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -165,10 +213,26 @@ addEventListener("deviceorientation", (e) => {
 });
 
 // ---------- 1단계: 각도 ----------
+// 각도가 안 맞는 동안은 사진 가운데에 크게, 맞으면 오른쪽 위 구석으로 작게
+const SMALL = 76;
+function placeLevel() {
+  const lv = $("#levelBox");
+  const x = levelBig ? box.x + box.w / 2 : box.x + box.w - 10 - SMALL / 2;
+  const y = levelBig ? box.y + box.h / 2 : box.y + 10 + SMALL / 2;
+  lv.style.left = x + "px"; lv.style.top = y + "px";
+  lv.classList.toggle("big", levelBig);
+  if (lv.classList.contains("instant")) requestAnimationFrame(() => requestAnimationFrame(() => lv.classList.remove("instant")));
+}
+function setLevelBig(big, t) {
+  if (big) { if (!angleBadAt) angleBadAt = t; if (levelBig || t - angleBadAt < 700) return; }
+  else angleBadAt = 0;
+  if (big === levelBig) return;
+  levelBig = big; placeLevel();
+}
 function checkAngle() {
   const lv = $("#levelBox");
   if (!orient) { lv.hidden = true; return { ok: true }; }
-  lv.hidden = false;
+  if (lv.hidden) { lv.hidden = false; lv.classList.add("instant"); placeLevel(); }
   const k = st.angle ? 1.3 : 1; // 한 번 맞으면 조금 넉넉하게 (깜빡임 방지)
   const [center, tol] = MODES[mode].angle, rollTol = MODES[mode].roll;
   const v = -orient.up;
@@ -177,7 +241,8 @@ function checkAngle() {
   const ok = !sideways && Math.abs(dy) <= 1 && Math.abs(dx) <= 1;
   // 공은 구슬처럼 낮은 쪽으로 굴러간다
   const clamp = (n) => Math.max(-2.1, Math.min(2.1, n));
-  $("#ball").style.transform = `translate(${-clamp(dx) * 14}px, ${clamp(dy) * 14}px)`;
+  // 이동 거리는 공 크기의 70% 단위 — 큰 원/작은 원 모두 같은 비율로 굴러간다
+  $("#ball").style.transform = `translate(${-50 - clamp(dx) * 70}%, ${-50 + clamp(dy) * 70}%)`;
   lv.classList.toggle("ok", ok);
   if (ok) return { ok };
   if (sideways) return { ok, main: "폰을 세로로 세워요" };
@@ -300,6 +365,9 @@ function backlit(reg) {
 // ---------- 매 프레임 ----------
 function loop(t) {
   requestAnimationFrame(loop);
+  // AI 준비 등으로 화면이 멈춘 시간은 빼고 센다
+  const dt = Math.min(100, Math.max(0, t - lastT)); lastT = t;
+  if (hintLeft > 0 && (hintLeft -= dt) <= 0) hideHint();
   if ($("#cam").hidden || !stream || !video.videoWidth) return;
   const c = crop();
   detect(t);
@@ -307,12 +375,13 @@ function loop(t) {
 
   const a = checkAngle(), p = checkPos(c);
   st.angle = a.ok; st.pos = p.ok;
+  if (orient) setLevelBig(!a.ok, t);
   const ready = a.ok && p.ok;
   draw();
   steps();
 
   let main, sub, go = false;
-  if (!a.ok) { main = a.main; sub = a.sub || "오른쪽 위 공을 가운데 원에 넣어요"; }
+  if (!a.ok) { main = a.main; sub = a.sub || "노란 공을 가운데 원에 넣어요"; }
   else if (!p.ok) { main = p.main; sub = p.sub || ""; }
   else { main = "좋아요, 지금 찍어요"; sub = st.tip; go = true; }
   if (main !== cand) { cand = main; candAt = t; }
@@ -344,6 +413,8 @@ function draw() {
   if (!target) return;
   const posOk = st.pos;
   ctx.lineCap = "round"; ctx.lineJoin = "round";
+  // 각도 단계 동안은 위치 안내를 아주 옅게 (공에 집중)
+  ctx.globalAlpha = st.angle ? 1 : 0.15;
 
   ctx.setLineDash([12, 9]); ctx.lineWidth = 3; ctx.strokeStyle = posOk ? READY : "rgba(255,255,255,.95)";
   ctx.shadowColor = "rgba(0,0,0,.45)"; ctx.shadowBlur = 6;
@@ -362,12 +433,12 @@ function draw() {
     ovalPath(W * 0.5, hy, hr, hr * 1.25); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(W * 0.2, H * 0.955); ctx.lineTo(W * 0.8, H * 0.955); ctx.stroke();
     ctx.setLineDash([]); ctx.shadowBlur = 0;
-    label("머리", W * 0.5 + hr + 30, hy + 5);
+    label("머리", W * 0.5 - hr - 30, hy + 5); // 왼쪽: 오른쪽 위는 수평 공 자리
     label("발끝", W * 0.5, H * 0.955 - 10);
   }
   ctx.setLineDash([]); ctx.shadowBlur = 0;
 
-  if (!live) return;
+  if (!live) { ctx.globalAlpha = 1; return; }
   const col = posOk ? READY : ME;
   ctx.strokeStyle = col; ctx.lineWidth = 4;
   if (live.kind === "oval") {
@@ -378,9 +449,10 @@ function draw() {
     ctx.fillStyle = col;
     dot(live.head.x * W, live.head.y * H, 9);
     if (live.feetSeen) dot(live.foot.x * W, Math.min(live.foot.y, 0.995) * H, 9);
-    ctx.globalAlpha = 0.6; ctx.beginPath(); ctx.moveTo(live.head.x * W, live.head.y * H);
-    ctx.lineTo(live.foot.x * W, Math.min(live.foot.y, 1) * H); ctx.stroke(); ctx.globalAlpha = 1;
+    ctx.globalAlpha *= 0.6; ctx.beginPath(); ctx.moveTo(live.head.x * W, live.head.y * H);
+    ctx.lineTo(live.foot.x * W, Math.min(live.foot.y, 1) * H); ctx.stroke();
   }
+  ctx.globalAlpha = 1;
 }
 function ovalPath(cx, cy, rx, ry) { ctx.beginPath(); ctx.ellipse(cx, cy, Math.max(1, rx), Math.max(1, ry), 0, 0, Math.PI * 2); }
 function dot(x, y, r) { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); }
@@ -423,12 +495,22 @@ async function capture() {
   const c = crop(); if (!c) return;
   const s = Math.min(1, 4096 / Math.max(c.cw, c.ch));
   cap.width = Math.round(c.cw * s); cap.height = Math.round(c.ch * s);
-  capEngine.render(video, c, beauty(), mirrored() && opts.mirror);
-  const blob = await new Promise((r) => cap.toBlob(r, "image/jpeg", 0.95));
+  const mir = mirrored() && opts.mirror;
+  // 뽀샵본과 원본(비교용)을 같은 프레임에서 바로 이어서 만든다
+  capEngine.render(video, c, beauty(), mir);
+  const pBlob = new Promise((r) => cap.toBlob(r, "image/jpeg", 0.95));
+  let pOrig = null;
+  if (opts.preset !== "none" && capEngine.gl) {
+    capEngine.render(video, c, PRESETS.none, mir);
+    pOrig = new Promise((r) => cap.toBlob(r, "image/jpeg", 0.92));
+  }
+  const [blob, orig] = await Promise.all([pBlob, pOrig]);
   if (!blob) return;
-  const shot = { blob, url: URL.createObjectURL(blob), thumb: null, at: Date.now(), saved: false };
+  const shot = { blob, url: URL.createObjectURL(blob), orig: orig ? URL.createObjectURL(orig) : null, thumb: null, at: Date.now(), saved: false };
   makeThumb(shot);
   shots.push(shot);
+  // 비교용 원본은 최근 3장만 보관 (메모리 절약)
+  shots.slice(0, -3).forEach((o) => { if (o.orig) { URL.revokeObjectURL(o.orig); o.orig = null; } });
   if (shots.length > 30) { const old = shots.shift(); URL.revokeObjectURL(old.url); if (old.thumb) URL.revokeObjectURL(old.thumb); }
   $("#thumbImg").src = shot.thumb || shot.url;
   const fl = $("#flash"); fl.classList.add("on"); setTimeout(() => fl.classList.remove("on"), 60);
@@ -445,8 +527,31 @@ function makeThumb(shot) {
   };
   setTimeout(() => (img.src = shot.url), 300);
 }
-function openReview(s) { current = s; $("#reviewImg").src = s.url; $("#reviewHint").textContent = ""; $("#review").hidden = false; }
-$("#retake").onclick = () => ($("#review").hidden = true);
+let holdSave = false; // 공유가 안 되는 폰: 길게 눌러 저장해야 하니 비교 끔
+function openReview(s) {
+  current = s; holdSave = false; showOrig(false);
+  $("#reviewImg").src = s.url; $("#reviewHint").textContent = "";
+  $("#compareHint").hidden = !s.orig;
+  $(".review-photo").classList.toggle("compare", !!s.orig);
+  $("#review").hidden = false;
+}
+// 사진을 누르고 있는 동안 뽀샵 전 원본
+function showOrig(on) {
+  const img = $("#reviewImg");
+  on = on && current && current.orig && !holdSave;
+  img.src = on ? current.orig : current ? current.url : "";
+  $("#origTag").hidden = !on;
+}
+{
+  const ph = $(".review-photo");
+  const down = (e) => { if (!current || !current.orig || holdSave) return; if (e.cancelable && e.type === "touchstart") e.preventDefault(); showOrig(true); };
+  const up = () => { if (!$("#origTag").hidden) showOrig(false); };
+  ph.addEventListener("pointerdown", down);
+  ph.addEventListener("touchstart", down, { passive: false });
+  for (const ev of ["pointerup", "pointercancel", "pointerleave", "touchend", "touchcancel"]) ph.addEventListener(ev, up);
+  ph.addEventListener("contextmenu", (e) => { if (!holdSave) e.preventDefault(); });
+}
+$("#retake").onclick = () => { showOrig(false); $("#review").hidden = true; };
 $("#saveBtn").onclick = async () => {
   if (!current || saving) return;
   saving = true;
@@ -462,6 +567,8 @@ async function save(s) {
     try { await navigator.share({ files: [file] }); toast("사진첩을 확인해 보세요"); return true; }
     catch (e) { if (e.name === "AbortError") return false; }
   }
+  holdSave = true; showOrig(false);
+  $(".review-photo").classList.remove("compare"); $("#compareHint").hidden = true;
   $("#reviewHint").textContent = "사진을 길게 눌러 '사진 앱에 저장'을 눌러요";
   return false;
 }
@@ -479,14 +586,18 @@ $("#galleryBtn").onclick = () => {
 };
 $("#closeGallery").onclick = () => ($("#gallery").hidden = true);
 
-// ---------- 뽀샵 ----------
+// ---------- 뽀샵: 셔터 위 3칸 (바로 적용) ----------
+if (!engine.gl) opts.preset = "none";
 function syncBeauty() {
-  $("#beautyName").textContent = beauty().name;
-  document.querySelectorAll("#presets button").forEach((b) => b.classList.toggle("on", b.dataset.p === opts.preset));
+  document.querySelectorAll("#presets button").forEach((b) => {
+    const on = b.dataset.p === opts.preset;
+    b.classList.toggle("on", on); b.setAttribute("aria-checked", on ? "true" : "false"); b.tabIndex = on ? 0 : -1;
+  });
 }
-document.querySelectorAll("#presets button").forEach((b) => (b.onclick = () => { opts.preset = b.dataset.p; saveOpts(); syncBeauty(); }));
-$("#beautyBtn").onclick = () => { if (!engine.gl) { toast("이 폰에서는 뽀샵을 쓸 수 없어요"); return; } $("#beauty").hidden = false; };
-$("#closeBeauty").onclick = () => ($("#beauty").hidden = true);
+document.querySelectorAll("#presets button").forEach((b) => (b.onclick = () => {
+  if (!engine.gl && b.dataset.p !== "none") { toast("이 폰에서는 뽀샵을 쓸 수 없어요"); return; }
+  opts.preset = b.dataset.p; saveOpts(); syncBeauty();
+}));
 syncBeauty();
 
 // ---------- 설정 ----------

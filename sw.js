@@ -1,7 +1,7 @@
 // 앱 파일 저장: 화면 파일은 새 버전 먼저(3초 넘으면 저장본), AI 파일은 따로 오래 보관
-const CACHE = "insaengshot-v9";
+const CACHE = "insaengshot-v10";
 const AIC = "insaengshot-ai-0.10.14";
-const CORE = ["./", "index.html", "style.css?v=9", "app.js?v=9", "beauty.js?v=9", "manifest.webmanifest", "icons/icon.svg", "icons/icon-192.png", "icons/icon-512.png"];
+const CORE = ["./", "index.html", "style.css?v=10", "app.js?v=10", "beauty.js?v=10", "manifest.webmanifest", "icons/icon.svg", "icons/icon-192.png", "icons/icon-512.png"];
 const AI = ["vendor/vision_bundle.mjs", "vendor/vision_wasm_internal.js", "vendor/vision_wasm_internal.wasm",
   "vendor/vision_wasm_nosimd_internal.js", "vendor/vision_wasm_nosimd_internal.wasm",
   "vendor/face_landmarker.task", "vendor/pose_landmarker_lite.task"];

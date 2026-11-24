@@ -100,7 +100,7 @@ function createPlain(canvas) {
 }
 
 export const PRESETS = {
-  none:    { name: "없음",        smooth: 0,    warm: 0 },
-  natural: { name: "피부결 정돈", smooth: 0.35, warm: 0.5 },
-  more:    { name: "조금 더",     smooth: 0.6,  warm: 0.7 },
+  none:    { name: "없음",    smooth: 0,    warm: 0 },
+  natural: { name: "살짝",    smooth: 0.35, warm: 0.5 },
+  more:    { name: "조금 더", smooth: 0.6,  warm: 0.7 },
 };

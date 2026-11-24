@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
-<link rel="stylesheet" href="style.css?v=9">
+<link rel="stylesheet" href="style.css?v=10">
 </head>
 <body>
 
@@ -60,10 +60,12 @@
     <button id="settingsBtn" class="round" aria-label="설정"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg></button>
   </header>
 
-  <div id="levelBox" class="level" hidden>
+  <div id="levelBox" class="level big" hidden>
     <div class="level-ring"><span class="level-target"></span><span id="ball" class="ball"></span></div>
-    <small>공을 가운데로</small>
+    <small>각도</small>
   </div>
+
+  <button id="modeHint" class="mode-hint" hidden>공 → 원 → 초록이면 찰칵</button>
 
   <div class="bottom">
     <div id="say" class="say">
@@ -71,11 +73,15 @@
       <span id="saySub"></span>
       <button id="retryBtn" class="primary retry" hidden>다시 시도</button>
     </div>
-    <button id="beautyBtn" class="chip" aria-label="뽀샵 바꾸기">뽀샵 <b id="beautyName">피부결 정돈</b><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+    <div id="presets" class="seg" role="radiogroup" aria-label="뽀샵">
+      <button role="radio" data-p="none">없음</button>
+      <button role="radio" data-p="natural">살짝</button>
+      <button role="radio" data-p="more">조금 더</button>
+    </div>
     <div class="controls">
       <button id="galleryBtn" class="thumb" aria-label="찍은 사진"><img id="thumbImg" alt=""></button>
       <button id="shutter" class="shutter" aria-label="찍기" disabled><span></span></button>
-      <span class="spacer" aria-hidden="true"></span>
+      <button id="zoomBtn" class="zoom" aria-label="배율 1x" hidden>1x</button>
     </div>
   </div>
 </section>
@@ -102,24 +108,14 @@
   </div>
 </div>
 
-<!-- 뽀샵 -->
-<div id="beauty" class="sheet clear" hidden>
-  <div class="sheet-card">
-    <h2>뽀샵</h2>
-    <p class="note">얼굴 모양은 그대로 두고 피부결과 혈색만 살짝 정돈해요</p>
-    <div id="presets" class="presets">
-      <button data-p="none">없음</button>
-      <button data-p="natural">피부결 정돈</button>
-      <button data-p="more">조금 더</button>
-    </div>
-    <button id="closeBeauty" class="primary wide">완료</button>
-  </div>
-</div>
-
 <!-- 찍은 직후 -->
 <div id="review" class="sheet dark" hidden>
   <div class="review">
-    <img id="reviewImg" alt="방금 찍은 사진">
+    <div class="review-photo">
+      <img id="reviewImg" alt="방금 찍은 사진" draggable="false">
+      <span id="origTag" class="orig-tag" hidden>원본</span>
+    </div>
+    <p id="compareHint" class="review-note" hidden>사진을 누르고 있으면 뽀샵 전 원본이 보여요</p>
     <p id="reviewHint" class="review-hint" aria-live="polite"></p>
     <div class="row2">
       <button id="retake" class="ghost">다시 찍기</button>
@@ -142,20 +138,19 @@
 <div id="settings" class="sheet" hidden>
   <div class="sheet-card">
     <h2>설정</h2>
-    <label class="opt"><span>목소리로 알려주기<small>친구를 찍어줄 때 편해요</small></span><input type="checkbox" id="optVoice"></label>
-    <label class="opt"><span>셀카를 거울처럼 저장</span><input type="checkbox" id="optMirror"></label>
+    <label class="opt"><span>목소리로 알려주기<small>화면을 못 볼 때 안내를 소리로 들려줘요</small></span><input type="checkbox" role="switch" id="optVoice"></label>
+    <label class="opt"><span>셀카를 거울처럼 저장</span><input type="checkbox" role="switch" id="optMirror"></label>
     <label class="opt"><span>사진 모양</span>
       <select id="optRatio"><option value="3:4">세로 3:4</option><option value="4:5">인스타 4:5</option><option value="9:16">스토리 9:16</option></select>
     </label>
     <button id="showHowto" class="ghost wide">사용법 다시 보기</button>
     <button id="closeSettings" class="primary wide">닫기</button>
-    <p class="ver">버전 9</p>
   </div>
 </div>
 
 <div id="toast" class="toast" role="status" hidden></div>
 <div class="turn" aria-hidden="true">폰을 세로로 돌려주세요</div>
 
-<script type="module" src="app.js?v=9"></script>
+<script type="module" src="app.js?v=10"></script>
 </body>
 </html>
