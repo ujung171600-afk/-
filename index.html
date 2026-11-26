@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
-<link rel="stylesheet" href="style.css?v=11">
+<link rel="stylesheet" href="style.css?v=12">
 </head>
 <body>
 
@@ -94,9 +94,8 @@
       <button id="retryBtn" class="primary retry" hidden>다시 시도</button>
     </div>
     <div id="presets" class="seg" role="radiogroup" aria-label="뽀샵">
-      <button role="radio" data-p="none">없음</button>
-      <button role="radio" data-p="natural">살짝</button>
-      <button role="radio" data-p="more">조금 더</button>
+      <button role="radio" data-p="none">원본</button>
+      <button role="radio" data-p="natural">피부톤 보정</button>
     </div>
     <div class="controls">
       <button id="galleryBtn" class="thumb" aria-label="찍은 사진"><img id="thumbImg" alt=""></button>
@@ -165,12 +164,13 @@
     </label>
     <button id="showHowto" class="ghost wide">사용법 다시 보기</button>
     <button id="closeSettings" class="primary wide">닫기</button>
+    <p class="ver">버전 12</p>
   </div>
 </div>
 
 <div id="toast" class="toast" role="status" hidden></div>
 <div class="turn" aria-hidden="true">폰을 세로로 돌려주세요</div>
 
-<script type="module" src="app.js?v=11"></script>
+<script type="module" src="app.js?v=12"></script>
 </body>
 </html>

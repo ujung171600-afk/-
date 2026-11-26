@@ -29,7 +29,7 @@ void main() {
   vec2 tc = crop.xy + uv * crop.zw;
   vec3 c = texture2D(tex, tc).rgb;
   float m = skin(c);
-  if (smoothAmt > 0.001 && m > 0.01) {
+  if (false) { // 피부 매끈 효과는 쓰지 않음 (피부톤만 보정)
     vec3 sum = c; float ws = 1.0;
     for (int i = 1; i < 20; i++) {
       float fi = float(i);
@@ -99,8 +99,8 @@ function createPlain(canvas) {
   };
 }
 
+// 피부톤만 살짝 보정. 피부 매끈·얼굴 모양·밝기는 건드리지 않음.
 export const PRESETS = {
-  none:    { name: "없음",    smooth: 0,    warm: 0 },
-  natural: { name: "살짝",    smooth: 0.35, warm: 0.5 },
-  more:    { name: "조금 더", smooth: 0.6,  warm: 0.7 },
+  none:    { name: "원본",   smooth: 0, warm: 0 },
+  natural: { name: "피부톤", smooth: 0, warm: 0.5 },
 };
