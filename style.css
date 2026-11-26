@@ -39,8 +39,35 @@ h1 { margin: 0; font-size: 28px; font-weight: 500; line-height: 1.2; }
 .pic .ghost { fill: none; stroke: #fff; stroke-width: 3; stroke-dasharray: 5 4; }
 .pic .body { fill: none; stroke: var(--me); stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; }
 .pic .floor { stroke: #fff; stroke-width: 3; stroke-dasharray: 5 4; }
+.pic .thin { fill: none; stroke: rgba(255,255,255,.35); stroke-width: 1.5; }
 .txt b { display: block; font-size: 18px; font-weight: 500; }
 .txt small { display: block; margin-top: 4px; color: var(--soft); font-size: 14px; }
+
+/* ---------- 구도 고르기 ---------- */
+:root { --accent: #a4483c; --fig: #d8d4cd; --pk-bg: #f1efeb; }
+#picker { background: var(--page); color: var(--ink); overflow-y: auto; -webkit-overflow-scrolling: touch;
+  padding: calc(env(safe-area-inset-top) + 12px) max(16px, env(safe-area-inset-right)) calc(env(safe-area-inset-bottom) + 24px) max(16px, env(safe-area-inset-left)); }
+.pk-top { display: flex; align-items: center; gap: 8px; max-width: 960px; margin: 0 auto; }
+.pk-top h1 { font-size: 22px; }
+.pk-back { width: 44px; height: 44px; flex: none; margin-left: -10px; border-radius: 12px; display: grid; place-items: center; transition: background .15s var(--ease); }
+.pk-back:active { background: var(--bg2); }
+.pk-back svg { width: 24px; height: 24px; fill: none; stroke: var(--ink); stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.pk-lead { max-width: 960px; margin: 6px auto 16px; color: var(--soft); font-size: 15px; line-height: 1.5; }
+.pk-grid { max-width: 960px; margin: 0 auto; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+@media (min-width: 700px) { .pk-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; } }
+.pk-card { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 8px 8px 10px; text-align: left; border-radius: 14px; background: var(--white);
+  border: 1px solid var(--line); box-shadow: 0 1px 2px rgba(0,0,0,.05); transition: background .15s var(--ease), transform .15s var(--ease), border-color .15s var(--ease); }
+.pk-card:active { transform: scale(0.98); background: var(--bg2); }
+.pk-card.last { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.pk-pic { display: block; border-radius: 8px; overflow: hidden; }
+.pk-pic svg { display: block; width: 100%; height: auto; aspect-ratio: 3 / 4; }
+.pk-bg { fill: var(--pk-bg); }
+.pk-fig { fill: var(--fig); stroke: var(--fig); stroke-linecap: round; stroke-linejoin: round; }
+.pk-fig > :not([fill="none"]) { stroke: none; }
+.pk-acc { fill: none; stroke: var(--accent); stroke-width: 1.1; stroke-linecap: round; stroke-linejoin: round; }
+.pk-name { display: flex; gap: 6px; align-items: baseline; font-size: 15px; font-weight: 500; line-height: 1.35; word-break: keep-all; }
+.pk-name i { flex: none; font-style: normal; font-weight: 400; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.pk-card.last .pk-name i { color: var(--accent); }
 
 /* ---------- 카메라 ---------- */
 #cam { overflow: hidden; }
@@ -84,9 +111,18 @@ h1 { margin: 0; font-size: 28px; font-weight: 500; line-height: 1.2; }
 .level.ok .ball { background: var(--ready); }
 .level.ok .level-ring { border-color: var(--ready); }
 
+/* 구도 버튼 / 구도 이름 */
+.pill { min-width: 44px; height: 44px; flex: none; padding: 0 10px; border-radius: 22px; background: rgba(0,0,0,.45); color: #fff; font-size: 14px; font-weight: 500; }
+#cam.comp .top { gap: 6px; }
+#cam.comp .steps li { padding: 6px 6px; gap: 4px; }
+.comp-tag { position: absolute; z-index: 4; display: flex; align-items: center; gap: 6px; pointer-events: none; }
+#compName { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 4px 8px; border-radius: 6px; background: rgba(0,0,0,.5); font-size: 13px; font-weight: 500; }
+.dir-btn { pointer-events: auto; flex: none; min-height: 44px; padding: 0 12px; border-radius: 10px; background: rgba(0,0,0,.55); border: 1px solid rgba(255,255,255,.35); color: #fff; font-size: 14px; font-weight: 500; }
+
 /* 친구 모드 한 줄 안내 */
 .mode-hint { position: absolute; left: 50%; transform: translateX(-50%); z-index: 5; max-width: calc(100% - 32px); white-space: nowrap;
   min-height: 40px; padding: 0 16px; border-radius: 10px; background: rgba(0,0,0,.62); color: #fff; font-size: 16px; font-weight: 500; }
+.mode-hint.long { white-space: normal; width: max-content; min-height: 44px; padding: 10px 16px; line-height: 1.4; text-align: center; word-break: keep-all; }
 
 .bottom { position: absolute; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; align-items: center; gap: 8px;
   padding: 0 max(12px, env(safe-area-inset-right)) calc(env(safe-area-inset-bottom) + 10px) max(12px, env(safe-area-inset-left)); }
